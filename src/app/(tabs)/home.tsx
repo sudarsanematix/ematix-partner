@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -23,35 +23,56 @@ export default function HomeScreen() {
   const router = useRouter();
   const [isOnline, setIsOnline] = useState(false);
   const [hasRequest, setHasRequest] = useState(false);
+  const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const greeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
+  };
 
   // Toggle online state and simulate a ride request popping up 3 seconds after going online
   const handleToggleOnline = () => {
     const newState = !isOnline;
     setIsOnline(newState);
     if (newState) {
-      setTimeout(() => setHasRequest(true), 3000);
+      requestTimer.current = setTimeout(() => setHasRequest(true), 3000);
     } else {
       setHasRequest(false);
+      if (requestTimer.current) {
+        clearTimeout(requestTimer.current);
+        requestTimer.current = null;
+      }
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (requestTimer.current) {
+        clearTimeout(requestTimer.current);
+        requestTimer.current = null;
+      }
+    };
+  }, []);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>
-            <Text style={styles.greeting}>Good Morning, Rajesh</Text>
+            <Text style={styles.greeting}>{`${greeting()}, Rajesh`}</Text>
             <View style={styles.ratingBadge}>
               <MaterialIcon name="star" size={14} color="#F59E0B" />
               <Text style={styles.ratingText}>4.92</Text>
             </View>
           </View>
           <View style={styles.headerRight}>
-            <TouchableOpacity style={styles.iconBtn}>
+            <TouchableOpacity style={styles.iconBtn} accessibilityLabel="Notifications" accessibilityRole="button" hitSlop={8} onPress={() => router.push('/notifications')}>
               <MaterialIcon name="notifications" size={24} color={colors.onSurface} />
               <View style={styles.notificationDot} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.profileBtn}>
+            <TouchableOpacity style={styles.profileBtn} accessibilityLabel="Profile" accessibilityRole="button" hitSlop={8}>
               <MaterialIcon name="account-circle" size={32} color={colors.primary} />
             </TouchableOpacity>
           </View>
@@ -107,6 +128,18 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* Verification banner */}
+        <TouchableOpacity style={styles.kycBanner} activeOpacity={0.85} onPress={() => router.push('/kyc')}>
+          <View style={styles.kycBannerIcon}>
+            <MaterialIcon name="verified-user" size={22} color={colors.onPrimary} />
+          </View>
+          <View style={styles.kycBannerText}>
+            <Text style={styles.kycBannerTitle}>Complete your KYC</Text>
+            <Text style={styles.kycBannerSub}>2 of 5 steps done · unlock your first payout</Text>
+          </View>
+          <MaterialIcon name="chevron-right" size={20} color={colors.onPrimaryContainer} />
+        </TouchableOpacity>
+
         {/* Quick Stats */}
         <Text style={styles.sectionTitle}>Today's Progress</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsScroll}>
@@ -145,7 +178,7 @@ export default function HomeScreen() {
       </ScrollView>
 
       {/* Incoming Request Bottom Sheet Overlay */}
-      <Modal transparent={true} visible={hasRequest} animationType="fade">
+      <Modal transparent={true} visible={hasRequest} animationType="fade" onRequestClose={() => setHasRequest(false)}>
         <View style={styles.requestSheetOverlay}>
           <View style={styles.requestSheet}>
             <View style={styles.sheetHandle} />
@@ -292,7 +325,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: colors.onSurfaceVariant,
   },
   textOnline: {
-    color: '#FFF',
+    color: colors.onPrimary,
   },
   scrollContent: {
     padding: spacing.marginMobile,
@@ -360,6 +393,37 @@ const createStyles = (colors: any) => StyleSheet.create({
     ...type.headlineSm,
     color: colors.onSurface,
     marginBottom: 12,
+  },
+  kycBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: radius.xl,
+    padding: spacing.cardPadding,
+    gap: spacing.stackMd,
+    marginBottom: spacing.stackLg,
+  },
+  kycBannerIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.lg,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  kycBannerText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  kycBannerTitle: {
+    ...type.labelLg,
+    color: colors.onPrimary,
+    fontFamily: fonts.bold,
+  },
+  kycBannerSub: {
+    ...type.bodySm,
+    color: colors.onPrimaryContainer,
+    marginTop: 2,
   },
   statsScroll: {
     gap: 12,

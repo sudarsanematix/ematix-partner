@@ -40,7 +40,7 @@ export default function ActiveRideScreen() {
       setRideState('EN_ROUTE_DROPOFF');
     } else {
       // Complete ride and go back to home
-      router.replace('/');
+      router.replace('/(tabs)/home');
     }
   };
 
@@ -73,7 +73,7 @@ export default function ActiveRideScreen() {
 
       {/* Floating Header */}
       <View style={styles.floatingHeader}>
-        <TouchableOpacity style={styles.roundBtn} onPress={() => router.replace('/')}>
+        <TouchableOpacity style={styles.roundBtn} onPress={() => router.replace('/(tabs)/home')}>
           <MaterialIcon name="close" size={24} color={colors.onSurface} />
         </TouchableOpacity>
         <View style={styles.statusPill}>

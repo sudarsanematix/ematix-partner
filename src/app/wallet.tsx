@@ -43,7 +43,7 @@ export default function WalletScreen() {
       
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} accessibilityLabel="Go back" accessibilityRole="button" hitSlop={8}>
           <MaterialIcon name="arrow-back" size={24} color={colors.onSurface} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Wallet</Text>
@@ -107,7 +107,7 @@ export default function WalletScreen() {
                 </View>
                 <Text style={[
                   styles.txnAmount, 
-                  { color: txn.type === 'credit' ? '#10B981' : colors.onSurface }
+                  { color: txn.type === 'credit' ? colors.primary : colors.onSurface }
                 ]}>
                   {txn.amount}
                 </Text>
@@ -130,7 +130,7 @@ export default function WalletScreen() {
       </View>
 
       {/* Withdraw Modal */}
-      <Modal visible={withdrawModalVisible} transparent animationType="slide">
+      <Modal visible={withdrawModalVisible} transparent animationType="slide" onRequestClose={() => setWithdrawModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.dragHandle} />
@@ -160,7 +160,7 @@ export default function WalletScreen() {
       </Modal>
 
       {/* Success Modal */}
-      <Modal visible={successVisible} transparent animationType="fade">
+      <Modal visible={successVisible} transparent animationType="fade" onRequestClose={() => setSuccessVisible(false)}>
         <View style={styles.modalOverlayCenter}>
           <View style={styles.successCard}>
             <View style={styles.successIconWrap}>

@@ -74,7 +74,7 @@ export default function EarningsScreen() {
           
           <View style={styles.tripsList}>
             {RECENT_TRIPS.map((trip) => (
-              <TouchableOpacity key={trip.id} style={styles.tripCard} activeOpacity={0.8}>
+              <TouchableOpacity key={trip.id} style={styles.tripCard} activeOpacity={0.8} onPress={() => router.push({ pathname: '/trip-details', params: { id: trip.id } })}>
                 <View style={styles.tripLeft}>
                   <View style={[styles.iconWrap, { backgroundColor: trip.type === 'parcel' ? colors.surfaceContainerHigh : colors.lightBlueTint }]}>
                     <MaterialIcon 

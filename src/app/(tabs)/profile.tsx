@@ -8,6 +8,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useRouter, type Href } from 'expo-router';
 import { useTheme } from '../../theme/ThemeProvider';
 import { fonts, type, spacing, radius } from '../../theme/typography';
 import SharedHeader from '../../components/SharedHeader';
@@ -16,13 +17,27 @@ import MaterialIcon from '../../components/MaterialIcon';
 const MENU_ITEMS = [
   { icon: 'directions-car', title: 'Vehicle Details', subtitle: 'TN 01 AB 1234 • Bajaj RE' },
   { icon: 'description', title: 'Documents', subtitle: 'RC Book, Insurance, License' },
+  { icon: 'fingerprint', title: 'KYC Verification', subtitle: 'Aadhaar, PAN, Bank, Selfie' },
   { icon: 'account-balance', title: 'Payout Methods', subtitle: 'HDFC Bank ending in 4321' },
   { icon: 'support-agent', title: 'Help & Support', subtitle: 'Contact partner support' },
 ];
 
+const MENU_ROUTES: Record<string, Href> = {
+  'Vehicle Details': '/settings',
+  Documents: '/documents',
+  'KYC Verification': '/kyc',
+  'Payout Methods': '/settings',
+  'Help & Support': '/support',
+};
+
 export default function ProfileScreen() {
   const { colors } = useTheme();
   const styles = createStyles(colors);
+  const router = useRouter();
+
+  const handleMenuPress = (title: string) => {
+    router.push(MENU_ROUTES[title] ?? '/settings');
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -54,7 +69,7 @@ export default function ProfileScreen() {
         {/* Menu Items */}
         <View style={styles.menuSection}>
           {MENU_ITEMS.map((item, index) => (
-            <TouchableOpacity key={index} style={styles.menuItem} activeOpacity={0.8}>
+            <TouchableOpacity key={index} style={styles.menuItem} activeOpacity={0.8} onPress={() => handleMenuPress(item.title)}>
               <View style={styles.menuLeft}>
                 <View style={styles.menuIconWrap}>
                   <MaterialIcon name={item.icon as any} size={22} color={colors.primary} />
@@ -72,18 +87,18 @@ export default function ProfileScreen() {
         {/* Settings */}
         <View style={styles.settingsSection}>
           <Text style={styles.sectionTitle}>App Settings</Text>
-          <TouchableOpacity style={styles.settingsItem}>
+          <TouchableOpacity style={styles.settingsItem} activeOpacity={0.8} onPress={() => router.push('/settings')}>
             <Text style={styles.settingsItemText}>Navigation Preferences</Text>
             <MaterialIcon name="map" size={18} color={colors.onSurfaceVariant} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.settingsItem}>
+          <TouchableOpacity style={styles.settingsItem} activeOpacity={0.8} onPress={() => router.push('/settings')}>
             <Text style={styles.settingsItemText}>Language</Text>
             <Text style={styles.settingsValue}>English</Text>
           </TouchableOpacity>
         </View>
 
         {/* Logout */}
-        <TouchableOpacity style={styles.logoutBtn} activeOpacity={0.8}>
+        <TouchableOpacity style={styles.logoutBtn} activeOpacity={0.8} onPress={() => router.replace('/login')}>
           <MaterialIcon name="logout" size={20} color={colors.accentRed} />
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
