@@ -1,58 +1,224 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  TextInput,
+  Modal,
   SafeAreaView,
   Platform,
-  Image,
+  Animated,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import * as Linking from 'expo-linking';
 import { useTheme } from '../theme/ThemeProvider';
 import { fonts, type, spacing, radius } from '../theme/typography';
 import RealMap from '../components/RealMap';
 import MaterialIcon from '../components/MaterialIcon';
 import SwipeButton from '../components/SwipeButton';
-import { useLocalSearchParams } from 'expo-router';
 import { socketService } from '../utils/socket';
-
-// Mock passenger data
-const PASSENGER = {
-  name: 'Anita S.',
-  rating: '4.8',
-  pickup: 'Phoenix Marketcity, Velachery',
-  dropoff: 'Anna Nagar Tower Park',
-  eta: '12 mins',
-  distance: '4.2 km',
-};
+import { useAuth } from '../context/AuthContext';
+import { telLink, formatFare } from '../utils/phone';
+import { setUnread, getUnread, clearUnread } from '../utils/unread';
 
 type RideState = 'EN_ROUTE_PICKUP' | 'ARRIVED' | 'EN_ROUTE_DROPOFF';
+
+type RideData = {
+  id: string;
+  status: string;
+  pickup: { address: string };
+  dropoff: { address: string };
+  price?: number | string | null;
+  customer?: {
+    id: string;
+    name?: string;
+    phone?: string;
+    rating?: number | null;
+  };
+  messages?: any[];
+};
 
 export default function ActiveRideScreen() {
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const router = useRouter();
-  const { rideId } = useLocalSearchParams();
+  const { rideId } = useLocalSearchParams<{ rideId: string }>();
+  const { user } = useAuth();
+  const [ride, setRide] = useState<RideData | null>(null);
   const [rideState, setRideState] = useState<RideState>('EN_ROUTE_PICKUP');
+  const [unread, setUnreadState] = useState(() => getUnread(rideId));
+  const [initialized, setInitialized] = useState(false);
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpInput, setOtpInput] = useState('');
+  const [otpError, setOtpError] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const pulse = useRef(new Animated.Value(1)).current;
+  const focusedRef = useRef(true);
+  const verifyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearVerifyTimer = () => {
+    if (verifyTimer.current) {
+      clearTimeout(verifyTimer.current);
+      verifyTimer.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (!rideId) return;
+
+    socketService.connect();
+    socketService.emit('join_ride', { rideId, role: 'partner', userId: user?.id });
+
+    const getTargetRideId = (data: any) => data?.rideId || data?.id;
+
+    const handleRideDetails = (data: any) => {
+      const targetId = getTargetRideId(data);
+      if (!data || (targetId && String(targetId) !== String(rideId))) return;
+      setRide(data);
+      const s = String(data.status || '');
+      if (s === 'arrived') setRideState('ARRIVED');
+      else if (s === 'en_route_dropoff' || s === 'completed') setRideState('EN_ROUTE_DROPOFF');
+      else setRideState('EN_ROUTE_PICKUP');
+      setInitialized(true);
+    };
+
+    const handleReceiveMessage = (data: any) => {
+      const targetId = getTargetRideId(data);
+      if (data && String(targetId) === String(rideId) && data.sender === 'customer') {
+        if (focusedRef.current) {
+          pulse.stopAnimation();
+          pulse.setValue(1);
+          Animated.loop(
+            Animated.sequence([
+              Animated.timing(pulse, { toValue: 0.55, duration: 350, useNativeDriver: true }),
+              Animated.timing(pulse, { toValue: 1, duration: 350, useNativeDriver: true }),
+            ])
+          ).start();
+        }
+        setUnread(rideId, true);
+        setUnreadState(true);
+      }
+    };
+
+    const handleRideError = (data: any) => {
+      console.log('[PartnerActiveRide] ride_error:', data);
+      if (!data) return;
+      clearVerifyTimer();
+      setIsVerifying(false);
+      if (data.code === 'ride_not_found') {
+        setShowOtpModal(false);
+        setOtpError('');
+        router.replace('/(tabs)/home');
+      } else if (data.code === 'invalid_ride_status') {
+        // The server hasn't registered our arrival yet — re-assert + resync
+        // instead of hanging the modal in the "Verifying..." state.
+        setOtpError('Arrival not confirmed yet. Retrying...');
+        socketService.emit('join_ride', { rideId, role: 'partner', userId: user?.id });
+        socketService.emit('partner_arrived', { rideId, partnerId: user?.id });
+      } else {
+        setShowOtpModal(true);
+        setOtpError(data?.message || 'Verification failed. Please try again.');
+      }
+    };
+
+    const handleRideStatus = (data: any) => {
+      const targetId = getTargetRideId(data);
+      if (!data || (targetId && String(targetId) !== String(rideId))) return;
+      if (data.status === 'arrived') setRideState('ARRIVED');
+      else if (data.status === 'en_route_dropoff') setRideState('EN_ROUTE_DROPOFF');
+    };
+
+    const handleRideStarted = (data: any) => {
+      const targetId = getTargetRideId(data);
+      if (!data || (targetId && String(targetId) !== String(rideId))) return;
+      clearVerifyTimer();
+      setShowOtpModal(false);
+      setOtpInput('');
+      setOtpError('');
+      setIsVerifying(false);
+      setRideState('EN_ROUTE_DROPOFF');
+    };
+
+    const handleRideCompleted = (data: any) => {
+      const targetId = getTargetRideId(data);
+      if (!data || (targetId && String(targetId) !== String(rideId))) return;
+      router.replace('/(tabs)/home');
+    };
+
+    const handleOtpError = (data: any) => {
+      clearVerifyTimer();
+      setOtpError(data?.message || 'Invalid PIN. Please try again.');
+      setIsVerifying(false);
+    };
+
+    socketService.on('ride_details', handleRideDetails);
+    socketService.on('receive_message', handleReceiveMessage);
+    socketService.on('ride_error', handleRideError);
+    socketService.on('ride_status_updated', handleRideStatus);
+    socketService.on('ride_started', handleRideStarted);
+    socketService.on('ride_completed', handleRideCompleted);
+    socketService.on('otp_error', handleOtpError);
+
+    return () => {
+      clearVerifyTimer();
+      socketService.off('ride_details', handleRideDetails);
+      socketService.off('receive_message', handleReceiveMessage);
+      socketService.off('ride_error', handleRideError);
+      socketService.off('ride_status_updated', handleRideStatus);
+      socketService.off('ride_started', handleRideStarted);
+      socketService.off('ride_completed', handleRideCompleted);
+      socketService.off('otp_error', handleOtpError);
+    };
+  }, [rideId, user?.id]);
+
+  const callPassenger = () => {
+    const href = telLink(ride?.customer?.phone);
+    if (href) {
+      Linking.openURL(href).catch(() => {});
+    }
+  };
+
+  const openChat = () => {
+    clearUnread(rideId);
+    setUnreadState(false);
+    router.push({ pathname: '/chat', params: { rideId: rideId || 'test_ride' } });
+  };
 
   const handleSlideAction = () => {
     if (rideState === 'EN_ROUTE_PICKUP') {
+      socketService.emit('partner_arrived', { rideId, partnerId: user?.id });
       setRideState('ARRIVED');
     } else if (rideState === 'ARRIVED') {
-      setRideState('EN_ROUTE_DROPOFF');
+      setShowOtpModal(true);
     } else {
-      // Complete ride and go back to home
-      if (rideId) {
-        socketService.emit('complete_ride', { rideId });
-      }
-      router.replace('/(tabs)/home');
+      socketService.emit('complete_ride', { rideId, partnerId: user?.id });
     }
+  };
+
+  const submitOtp = () => {
+    const otp = otpInput.trim();
+    if (otp.length !== 4 || isVerifying) return;
+    setOtpError('');
+    setIsVerifying(true);
+    socketService.emit('verify_otp', { rideId, partnerId: user?.id, otp });
+    clearVerifyTimer();
+    verifyTimer.current = setTimeout(() => {
+      setIsVerifying(false);
+      setOtpError('Verification timed out. Please try again.');
+    }, 10000);
+  };
+
+  const closeOtpModal = () => {
+    clearVerifyTimer();
+    setShowOtpModal(false);
+    setOtpError('');
+    setIsVerifying(false);
   };
 
   const getButtonText = () => {
     if (rideState === 'EN_ROUTE_PICKUP') return 'Slide to Arrive';
-    if (rideState === 'ARRIVED') return 'Slide to Start Trip';
+    if (rideState === 'ARRIVED') return 'Enter OTP to Start Trip';
     return 'Slide to Dropoff';
   };
 
@@ -65,13 +231,15 @@ export default function ActiveRideScreen() {
   const getTargetColor = () => {
     if (rideState === 'EN_ROUTE_PICKUP') return '#10B981';
     if (rideState === 'ARRIVED') return colors.accentRed;
-    return colors.surfaceGray; // Last state fades to grey
+    return colors.surfaceGray;
   };
 
+  const passengerName = ride?.customer?.name || 'Passenger';
+
   const getStatusText = () => {
-    if (rideState === 'EN_ROUTE_PICKUP') return `Picking up ${PASSENGER.name}`;
-    if (rideState === 'ARRIVED') return `Waiting for ${PASSENGER.name}`;
-    return `Dropping off ${PASSENGER.name}`;
+    if (rideState === 'EN_ROUTE_PICKUP') return `Picking up ${passengerName}`;
+    if (rideState === 'ARRIVED') return `Waiting for ${passengerName}`;
+    return `Dropping off ${passengerName}`;
   };
 
   return (
@@ -109,13 +277,13 @@ export default function ActiveRideScreen() {
       <View style={styles.bottomSheet}>
         <View style={styles.sheetHandle} />
 
-        {/* ETA & Nav Info */}
+        {/* Trip Status & Fare */}
         <View style={styles.etaRow}>
-          <Text style={styles.etaText}>{PASSENGER.eta}</Text>
+          <Text style={styles.etaText}>{rideState === 'EN_ROUTE_PICKUP' ? 'On the way' : rideState === 'ARRIVED' ? 'Arrived' : 'In Trip'}</Text>
           <View style={styles.etaDivider} />
-          <Text style={styles.distText}>{PASSENGER.distance}</Text>
+          <Text style={styles.distText}>{formatFare(ride?.price)}</Text>
           <View style={styles.etaDivider} />
-          <Text style={styles.distText}>via Inner Ring Rd</Text>
+          <Text style={styles.distText}>{ride?.customer?.phone ? `+${ride.customer.phone.replace(/\D/g, '').slice(-10)}` : 'Fare'}</Text>
         </View>
 
         {/* Location Info */}
@@ -132,7 +300,9 @@ export default function ActiveRideScreen() {
               {rideState === 'EN_ROUTE_DROPOFF' ? 'Dropoff' : 'Pickup'}
             </Text>
             <Text style={styles.locValue} numberOfLines={1}>
-              {rideState === 'EN_ROUTE_DROPOFF' ? PASSENGER.dropoff : PASSENGER.pickup}
+              {rideState === 'EN_ROUTE_DROPOFF'
+                ? (ride?.dropoff?.address || 'Dropoff location')
+                : (ride?.pickup?.address || 'Pickup location')}
             </Text>
           </View>
           <TouchableOpacity style={styles.navBtn}>
@@ -140,38 +310,93 @@ export default function ActiveRideScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Passenger Info (Hide during dropoff for space if needed, but keeping it is fine) */}
+        {/* Passenger Info */}
         <View style={styles.passengerRow}>
           <View style={styles.avatarWrap}>
             <MaterialIcon name="person" size={24} color={colors.onSurfaceVariant} />
           </View>
           <View style={styles.passengerTextWrap}>
-            <Text style={styles.passengerName}>{PASSENGER.name}</Text>
-            <View style={styles.ratingWrap}>
-              <MaterialIcon name="star" size={14} color="#F59E0B" />
-              <Text style={styles.ratingText}>{PASSENGER.rating}</Text>
-            </View>
+            <Text style={styles.passengerName}>{passengerName}</Text>
+            {ride?.customer?.rating != null ? (
+              <View style={styles.ratingWrap}>
+                <MaterialIcon name="star" size={14} color="#F59E0B" />
+                <Text style={styles.ratingText}>{ride.customer.rating}</Text>
+              </View>
+            ) : (
+              <View style={styles.ratingWrap}>
+                <Text style={styles.ratingText}>
+                  {ride?.customer?.phone ? `+${ride.customer.phone.replace(/\d(?=\d{4})/g, '*')}` : 'Verified passenger'}
+                </Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.actionRow}>
-            <TouchableOpacity style={styles.circleBtn}>
+            <TouchableOpacity style={styles.circleBtn} onPress={callPassenger}>
               <MaterialIcon name="call" size={20} color={colors.onSurface} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.circleBtn} onPress={() => router.push({ pathname: '/chat', params: { rideId: rideId || 'test_ride' } })}>
+            <TouchableOpacity style={styles.circleBtn} onPress={openChat}>
+              {unread && <View style={styles.unreadDot} />}
               <MaterialIcon name="chat" size={20} color={colors.onSurface} />
             </TouchableOpacity>
           </View>
         </View>
 
         {/* Custom Interactive Swipe Button */}
-        <SwipeButton
-          key={rideState}
-          title={getButtonText()}
-          onComplete={handleSlideAction}
-          color={getButtonColor()}
-          targetColor={getTargetColor()}
-        />
+        {rideState === 'ARRIVED' ? (
+          <TouchableOpacity style={styles.otpStartBtn} onPress={() => setShowOtpModal(true)} activeOpacity={0.9}>
+            <MaterialIcon name="pin" size={20} color={colors.onPrimary} />
+            <Text style={styles.otpStartBtnText}>{getButtonText()}</Text>
+          </TouchableOpacity>
+        ) : (
+          <SwipeButton
+            key={rideState}
+            title={getButtonText()}
+            onComplete={handleSlideAction}
+            color={getButtonColor()}
+            targetColor={getTargetColor()}
+          />
+        )}
       </View>
+
+      {/* OTP Verification Modal */}
+      <Modal
+        visible={showOtpModal}
+        transparent
+        animationType="slide"
+        onRequestClose={closeOtpModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Start Trip</Text>
+            <Text style={styles.modalSubtitle}>
+              Ask the customer for their ride-start PIN, then enter the 4-digit code to start the trip.
+            </Text>
+            <TextInput
+              style={styles.otpInput}
+              value={otpInput}
+              onChangeText={(t) => setOtpInput(t.replace(/[^0-9]/g, '').slice(0, 4))}
+              placeholder={'\u2022 \u2022 \u2022 \u2022'}
+              placeholderTextColor={colors.outlineVariant}
+              keyboardType="number-pad"
+              maxLength={4}
+              autoFocus
+            />
+            {otpError ? <Text style={styles.otpError}>{otpError}</Text> : null}
+            <TouchableOpacity
+              style={[styles.submitBtn, isVerifying || otpInput.length !== 4 ? styles.submitBtnDisabled : null]}
+              onPress={submitOtp}
+              disabled={isVerifying || otpInput.length !== 4}
+            >
+              <Text style={styles.submitBtnText}>{isVerifying ? 'Verifying...' : 'Start Trip'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelBtn} onPress={closeOtpModal} disabled={isVerifying}>
+              <Text style={styles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -370,5 +595,111 @@ const createStyles = (colors: any) => StyleSheet.create({
     backgroundColor: colors.surfaceContainerHigh,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  unreadDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.accentRed,
+  },
+  otpStartBtn: {
+    height: 56,
+    borderRadius: radius.lg,
+    backgroundColor: '#10B981',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  otpStartBtnText: {
+    ...type.labelLg,
+    color: colors.onPrimary,
+    fontFamily: fonts.bold,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: colors.surfaceContainerLowest,
+    borderRadius: radius.xl,
+    padding: 24,
+    alignItems: 'center',
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: colors.outlineVariant,
+    borderRadius: 2,
+    marginBottom: 16,
+  },
+  modalTitle: {
+    ...type.headlineMd,
+    color: colors.onSurface,
+    fontFamily: fonts.bold,
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    ...type.bodySm,
+    color: colors.onSurfaceVariant,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  otpInput: {
+    width: '100%',
+    height: 56,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceContainerHigh,
+    borderWidth: 1.5,
+    borderColor: colors.outlineVariant,
+    textAlign: 'center',
+    fontSize: 24,
+    letterSpacing: 10,
+    fontFamily: fonts.bold,
+    color: colors.onSurface,
+  },
+  otpError: {
+    ...type.labelSm,
+    color: colors.accentRed,
+    marginTop: 10,
+  },
+  submitBtn: {
+    width: '100%',
+    height: 50,
+    borderRadius: radius.lg,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+  },
+  submitBtnDisabled: {
+    opacity: 0.5,
+  },
+  submitBtnText: {
+    ...type.labelLg,
+    color: colors.onPrimary,
+    fontFamily: fonts.bold,
+  },
+  cancelBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    marginTop: 12,
+  },
+  cancelBtnText: {
+    ...type.labelMd,
+    color: colors.onSurfaceVariant,
   },
 });

@@ -5,6 +5,7 @@ import SharedHeader from '../components/SharedHeader';
 import MaterialIcon, { MaterialIconName } from '../components/MaterialIcon';
 import { useTheme } from '../theme/ThemeProvider';
 import { fonts, type, spacing, radius } from '../theme/typography';
+import { useAuth } from '../context/AuthContext';
 
 function Row({
   icon,
@@ -65,6 +66,7 @@ function Row({
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const { logout } = useAuth();
   const { colors } = useTheme();
   const styles = createStyles(colors);
 
@@ -143,7 +145,10 @@ export default function SettingsScreen() {
           <Row icon="verified-user" label="About" sublabel="Ematix Partner v1.0.0" onPress={() => router.back()} last />
         </View>
 
-        <TouchableOpacity style={styles.logoutBtn} activeOpacity={0.85} onPress={() => router.replace('/login')}>
+        <TouchableOpacity style={styles.logoutBtn} activeOpacity={0.85} onPress={async () => {
+          await logout();
+          router.replace('/login');
+        }}>
           <MaterialIcon name="logout" size={18} color={colors.accentRed} />
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>

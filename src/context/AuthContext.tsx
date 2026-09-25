@@ -5,14 +5,25 @@ type User = {
   id: string;
   phone: string;
   name: string;
+  email?: string;
+  createdAt?: string;
+  dob?: string;
+  city?: string;
+  serviceArea?: string;
   vehicleType?: string;
   vehicleNumber?: string;
   vehicleModel?: string;
+  licenseNumber?: string;
+  licenseExpiry?: string;
+  kycStatus?: string;
 };
 
 type AuthContextType = {
   user: User | null;
   token: string | null;
+  loading: boolean;
+  isOnline: boolean;
+  setIsOnline: (online: boolean) => Promise<void>;
   login: (userData: User, authToken: string) => Promise<void>;
   logout: () => Promise<void>;
 };
@@ -22,23 +33,40 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [isOnline, setIsOnlineState] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Load auth state from storage on startup
-    const loadAuth = async () => {
+    (async () => {
       try {
-        const storedToken = await AsyncStorage.getItem('@ematix_partner_token');
-        const storedUser = await AsyncStorage.getItem('@ematix_partner_user');
+        const [storedToken, storedUser, storedOnline] = await Promise.all([
+          AsyncStorage.getItem('@ematix_partner_token'),
+          AsyncStorage.getItem('@ematix_partner_user'),
+          AsyncStorage.getItem('@ematix_partner_is_online'),
+        ]);
         if (storedToken && storedUser) {
           setToken(storedToken);
           setUser(JSON.parse(storedUser));
         }
-      } catch (e) {
-        console.error('Failed to load auth state', e);
+        if (storedOnline === 'true') {
+          setIsOnlineState(true);
+        }
+      } catch (error) {
+        console.error('[Auth] Failed to restore session', error);
+      } finally {
+        setLoading(false);
       }
-    };
-    loadAuth();
+    })();
   }, []);
+
+  const setIsOnline = async (online: boolean) => {
+    setIsOnlineState(online);
+    try {
+      await AsyncStorage.setItem('@ematix_partner_is_online', online ? 'true' : 'false');
+    } catch (e) {
+      console.error('[Auth] Failed to set online state', e);
+    }
+  };
 
   const login = async (userData: User, authToken: string) => {
     setUser(userData);
@@ -50,12 +78,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     setUser(null);
     setToken(null);
-    await AsyncStorage.removeItem('@ematix_partner_token');
-    await AsyncStorage.removeItem('@ematix_partner_user');
+    setIsOnlineState(false);
+    await Promise.all([
+      AsyncStorage.removeItem('@ematix_partner_token'),
+      AsyncStorage.removeItem('@ematix_partner_user'),
+      AsyncStorage.removeItem('@ematix_partner_is_online'),
+    ]);
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout }}>
+    <AuthContext.Provider value={{ user, token, loading, isOnline, setIsOnline, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

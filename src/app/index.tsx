@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Animated, Image } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useAuth } from '../context/AuthContext';
 
 export default function SplashScreen() {
   const router = useRouter();
+  const { user, loading } = useAuth();
   
   // Animation values for the dots
   const [dot1] = useState(() => new Animated.Value(0));
@@ -11,10 +13,24 @@ export default function SplashScreen() {
   const [dot3] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
-    // Navigate to login after 3 seconds
-    const timer = setTimeout(() => {
+    if (loading) return;
+
+    const navigate = () => {
+      if (user) {
+        router.replace('/(tabs)/home');
+        return;
+      }
       router.replace('/login');
-    }, 3000);
+    };
+
+    // When there's no session, go straight to login — don't sit on the splash.
+    if (!user) {
+      navigate();
+      return () => {};
+    }
+
+    // Navigate after 3 seconds
+    const timer = setTimeout(navigate, 3000);
 
     // Setup bounce animation
     const animateDot = (dot: any, delay: number) => {
@@ -40,7 +56,7 @@ export default function SplashScreen() {
     animateDot(dot3, 300);
 
     return () => clearTimeout(timer);
-  }, [router, dot1, dot2, dot3]);
+  }, [user, loading, dot1, dot2, dot3]);
 
   return (
     <View style={styles.container}>
@@ -48,8 +64,9 @@ export default function SplashScreen() {
         {/* Branding / Logo */}
         <View style={styles.logoContainer}>
           <Image 
-            source={{ uri: 'https://raw.githubusercontent.com/microsoft/fluentui-emoji/main/assets/Automobile/3D/automobile_3d.png' }} 
+            source={require('../../assets/images/bike.png')} 
             style={styles.logoImage} 
+            resizeMode="contain"
           />
         </View>
         

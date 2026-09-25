@@ -8,6 +8,7 @@ import {
   ScrollView,
   Platform,
   Modal,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -18,16 +19,22 @@ import SwipeButton from '../../components/SwipeButton';
 import AnimatedWifiIcon from '../../components/AnimatedWifiIcon';
 import { socketService } from '../../utils/socket';
 import { useAuth } from '../../context/AuthContext';
+import { formatFare } from '../../utils/phone';
 
 export default function HomeScreen() {
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const router = useRouter();
-  const { user } = useAuth();
-  const [isOnline, setIsOnline] = useState(false);
+  const { user, logout, isOnline, setIsOnline } = useAuth();
   const [hasRequest, setHasRequest] = useState(false);
+  const [accepting, setAccepting] = useState(false);
   const [currentRequest, setCurrentRequest] = useState<any>(null);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestRef = useRef<any>(null);
+
+  useEffect(() => {
+    requestRef.current = currentRequest;
+  }, [currentRequest]);
 
   const greeting = () => {
     const hour = new Date().getHours();
@@ -36,38 +43,75 @@ export default function HomeScreen() {
     return 'Good Evening';
   };
 
-  // Toggle online state and connect to socket
-  const handleToggleOnline = () => {
-    const newState = !isOnline;
-    setIsOnline(newState);
-    if (newState) {
+  const closeRequest = () => {
+    setHasRequest(false);
+    setCurrentRequest(null);
+    setAccepting(false);
+  };
+
+  // Keep socket connection and request listeners active whenever partner is online
+  useEffect(() => {
+    if (isOnline) {
       socketService.connect();
-      socketService.on('new_ride_request', (data: any) => {
+
+      const handleNewRideRequest = (data: any) => {
         console.log('[Partner App] Received ride request:', data);
         setCurrentRequest(data);
         setHasRequest(true);
-      });
-      socketService.on('ride_unavailable', (data: any) => {
-        if (currentRequest && currentRequest.id === data.rideId) {
-          setHasRequest(false);
-          setCurrentRequest(null);
+      };
+
+      const handleRideUnavailable = (data: any) => {
+        if (requestRef.current && requestRef.current.id === data.rideId) {
+          closeRequest();
         }
-      });
+      };
+
+      const handleRideAssigned = (data: any) => {
+        console.log('[Partner App] Ride assigned:', data);
+        closeRequest();
+        if (data?.id) {
+          router.push(`/active-ride?rideId=${data.id}`);
+        }
+      };
+
+      const handleRideError = (data: any) => {
+        if (requestRef.current && requestRef.current.id === data?.rideId) {
+          closeRequest();
+          Alert.alert('Ride unavailable', data?.message || 'This ride is no longer available.');
+        }
+      };
+
+      socketService.on('new_ride_request', handleNewRideRequest);
+      socketService.on('ride_unavailable', handleRideUnavailable);
+      socketService.on('ride_assigned', handleRideAssigned);
+      socketService.on('ride_error', handleRideError);
+
+      return () => {
+        socketService.off('new_ride_request', handleNewRideRequest);
+        socketService.off('ride_unavailable', handleRideUnavailable);
+        socketService.off('ride_assigned', handleRideAssigned);
+        socketService.off('ride_error', handleRideError);
+      };
     } else {
-      setHasRequest(false);
-      setCurrentRequest(null);
+      closeRequest();
       socketService.off('new_ride_request');
       socketService.off('ride_unavailable');
+      socketService.off('ride_assigned');
+      socketService.off('ride_error');
       socketService.disconnect();
     }
+  }, [isOnline, router]);
+
+  // Toggle online state explicitly requested by user
+  const handleToggleOnline = async () => {
+    await setIsOnline(!isOnline);
   };
 
-  useEffect(() => {
-    return () => {
-      socketService.off('new_ride_request');
-      socketService.off('ride_unavailable');
-    };
-  }, []);
+  const acceptRide = () => {
+    if (!currentRequest?.id || accepting) return;
+    setAccepting(true);
+    socketService.emit('accept_ride', { rideId: currentRequest.id, partnerId: user?.id });
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -75,17 +119,21 @@ export default function HomeScreen() {
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>
             <Text style={styles.greeting}>{`${greeting()}, ${user?.name || user?.phone || 'Partner'}`}</Text>
-            <View style={styles.ratingBadge}>
-              <MaterialIcon name="star" size={14} color="#F59E0B" />
-              <Text style={styles.ratingText}>4.92</Text>
-            </View>
           </View>
           <View style={styles.headerRight}>
             <TouchableOpacity style={styles.iconBtn} accessibilityLabel="Notifications" accessibilityRole="button" hitSlop={8} onPress={() => router.push('/notifications')}>
               <MaterialIcon name="notifications" size={24} color={colors.onSurface} />
               <View style={styles.notificationDot} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.profileBtn} accessibilityLabel="Profile" accessibilityRole="button" hitSlop={8}>
+            <TouchableOpacity 
+              style={styles.profileBtn} 
+              accessibilityLabel="Profile" 
+              accessibilityRole="button" 
+              hitSlop={8}
+              onPress={async () => {
+                await logout();
+              }}
+            >
               <MaterialIcon name="account-circle" size={32} color={colors.primary} />
             </TouchableOpacity>
           </View>
@@ -196,33 +244,32 @@ export default function HomeScreen() {
           <View style={styles.requestSheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.requestTitle}>New Ride Request</Text>
-            
+            {currentRequest?.customer?.name ? (
+              <Text style={styles.requestCustomer}>from {currentRequest.customer.name}</Text>
+            ) : null}
+
             <View style={styles.requestRow}>
               <View style={styles.timeBox}>
                 <Text style={styles.timeMins}>{currentRequest?.eta ? parseInt(currentRequest.eta) : 2}</Text>
                 <Text style={styles.timeUnit}>min away</Text>
               </View>
               <View style={styles.requestRoute}>
-                <Text style={styles.pickupText}>{currentRequest?.pickup || 'Phoenix Marketcity'}</Text>
-                <Text style={styles.dropoffText}>→ {currentRequest?.dropoff || 'Anna Nagar Tower'}</Text>
+                <Text style={styles.pickupText}>{currentRequest?.pickup?.address || 'Phoenix Marketcity'}</Text>
+                <Text style={styles.dropoffText}>→ {currentRequest?.dropoff?.address || 'Anna Nagar Tower'}</Text>
               </View>
               <View style={styles.fareBox}>
-                <Text style={styles.fareAmt}>₹{currentRequest?.price || '320'}</Text>
-                <Text style={styles.fareLabel}>{currentRequest?.type === 'parcel' ? 'Delivery' : 'Cash'}</Text>
+                <Text style={styles.fareAmt}>{formatFare(currentRequest?.price)}</Text>
+                <Text style={styles.fareLabel}>{currentRequest?.type === 'parcel' ? 'Delivery' : 'Ride'}</Text>
               </View>
             </View>
 
             <View style={styles.requestActions}>
-              <TouchableOpacity style={styles.declineBtn} onPress={() => setHasRequest(false)}>
+<TouchableOpacity style={styles.declineBtn} onPress={closeRequest}>
                 <Text style={styles.declineText}>Decline</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.acceptBtn} onPress={() => {
-                socketService.emit('accept_ride', { rideId: currentRequest?.id });
-                setHasRequest(false);
-                router.push(`/active-ride?rideId=${currentRequest?.id}`);
-              }}>
-                <Text style={styles.acceptText}>Accept Ride</Text>
-              </TouchableOpacity>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.acceptBtn} onPress={acceptRide} disabled={accepting}>
+                  <Text style={styles.acceptText}>{accepting ? 'Accepting...' : 'Accept Ride'}</Text>
+                </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -252,20 +299,6 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   greeting: {
     ...type.headlineSm,
-    color: colors.onSurface,
-  },
-  ratingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surfaceContainerHigh,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
-    alignSelf: 'flex-start',
-    gap: 4,
-  },
-  ratingText: {
-    ...type.labelSm,
     color: colors.onSurface,
   },
   headerRight: {
@@ -536,6 +569,13 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: colors.onSurface,
     textAlign: 'center',
     marginBottom: 24,
+  },
+  requestCustomer: {
+    ...type.bodySm,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: -18,
+    marginBottom: 16,
   },
   requestRow: {
     flexDirection: 'row',

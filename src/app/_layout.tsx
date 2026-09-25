@@ -1,9 +1,9 @@
-import { Stack } from 'expo-router';
+import { Stack, useRouter, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider } from '../theme/ThemeProvider';
-import { AuthProvider } from '../context/AuthContext';
+import { AuthProvider, useAuth } from '../context/AuthContext';
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, Inter_800ExtraBold } from '@expo-google-fonts/inter';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
@@ -23,6 +23,31 @@ if (Platform.OS === 'web') {
     }
     originalWarn(...args);
   };
+}
+
+function AuthGuard({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  const pathname = usePathname();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (loading) return;
+
+    // Root '/' is the splash screen — it drives its own navigation.
+    const isAuthRoute = pathname === '/login' || pathname === '/signup';
+
+    if (!user && pathname !== '/' && !isAuthRoute) {
+      // Not logged in and not on an auth screen → send to login
+      router.replace('/login');
+    } else if (user && isAuthRoute) {
+      // Logged in and on login/signup → go to home
+      router.replace('/(tabs)/home');
+    }
+  }, [user, loading, pathname, router]);
+
+  // Always render the navigator. Routing happens in the effect above; the
+  // (tabs) layout guards its own screens from flashing while logged out.
+  return <>{children}</>;
 }
 
 export default function RootLayout() {
@@ -49,9 +74,11 @@ export default function RootLayout() {
       <ThemeProvider>
         <SafeAreaProvider>
           <StatusBar hidden />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          </Stack>
+          <AuthGuard>
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            </Stack>
+          </AuthGuard>
         </SafeAreaProvider>
       </ThemeProvider>
     </AuthProvider>

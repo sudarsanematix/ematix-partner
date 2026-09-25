@@ -34,10 +34,22 @@ export default function ProfileScreen() {
     ? user.vehicleType.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) 
     : 'Vehicle';
 
+  const joinDate = user?.createdAt ? new Date(user.createdAt) : null;
+  const joinedText = joinDate && !isNaN(joinDate.getTime())
+    ? `Partner since ${joinDate.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`
+    : null;
+
+  const maskPhone = (phone?: string) => {
+    if (!phone) return null;
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length !== 10) return phone;
+    return `+91 ${digits.replace(/\d(?=\d{4})/g, '*')}`;
+  };
+
   const MENU_ITEMS = [
     { icon: 'description', title: 'Documents', subtitle: 'RC Book, Insurance, License' },
     { icon: 'fingerprint', title: 'KYC Verification', subtitle: 'Aadhaar, PAN, Bank, Selfie' },
-    { icon: 'account-balance', title: 'Payout Methods', subtitle: 'HDFC Bank ending in 4321' },
+    { icon: 'account-balance', title: 'Payout Methods', subtitle: 'Add bank / UPI for payouts' },
     { icon: 'support-agent', title: 'Help & Support', subtitle: 'Contact partner support' },
   ];
 
@@ -58,18 +70,11 @@ export default function ProfileScreen() {
             <MaterialIcon name="account-circle" size={80} color={colors.primary} />
           </View>
           <Text style={styles.driverName}>{user?.name || user?.phone || 'Partner'}</Text>
-          <Text style={styles.joinedText}>Partner since Jan 2024 • {displayType}</Text>
-          
-          <View style={styles.badgesRow}>
-            <View style={styles.badge}>
-              <MaterialIcon name="star" size={16} color="#F59E0B" />
-              <Text style={styles.badgeText}>4.92</Text>
-            </View>
-            <View style={styles.badge}>
-              <MaterialIcon name="verified" size={16} color={colors.primary} />
-              <Text style={styles.badgeText}>Platinum Tier</Text>
-            </View>
-          </View>
+          {user?.email ? <Text style={styles.contactText}>{user.email}</Text> : null}
+          {maskPhone(user?.phone) ? <Text style={styles.contactText}>{maskPhone(user?.phone)}</Text> : null}
+          <Text style={styles.joinedText}>
+            {joinedText ? `${joinedText} • ${displayType}` : displayType}
+          </Text>
         </View>
 
         {/* Menu Items */}
@@ -135,33 +140,15 @@ const createStyles = (colors: any) => StyleSheet.create({
     ...type.headlineMd,
     color: colors.onSurface,
   },
+  contactText: {
+    ...type.bodyMd,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
   joinedText: {
     ...type.bodySm,
     color: colors.textMuted,
     marginTop: 2,
-  },
-  badgesRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
-  },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surfaceContainerLowest,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    gap: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  badgeText: {
-    ...type.labelMd,
-    color: colors.onSurface,
   },
   menuSection: {
     backgroundColor: colors.surfaceContainerLowest,
