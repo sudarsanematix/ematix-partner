@@ -50,9 +50,11 @@ export default function RealMap({ style, region = CHENNAI_REGION, interactive = 
         }}
       />
       <View style={styles.webTint} pointerEvents="none" />
-      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-        {children}
-      </View>
+      {children ? (
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+          {children}
+        </View>
+      ) : null}
     </View>
   );
 }

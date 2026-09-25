@@ -13,17 +13,11 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { fonts, type, spacing, radius } from '../../theme/typography';
 import SharedHeader from '../../components/SharedHeader';
 import MaterialIcon from '../../components/MaterialIcon';
+import { useAuth } from '../../context/AuthContext';
 
-const MENU_ITEMS = [
-  { icon: 'directions-car', title: 'Vehicle Details', subtitle: 'TN 01 AB 1234 • Bajaj RE' },
-  { icon: 'description', title: 'Documents', subtitle: 'RC Book, Insurance, License' },
-  { icon: 'fingerprint', title: 'KYC Verification', subtitle: 'Aadhaar, PAN, Bank, Selfie' },
-  { icon: 'account-balance', title: 'Payout Methods', subtitle: 'HDFC Bank ending in 4321' },
-  { icon: 'support-agent', title: 'Help & Support', subtitle: 'Contact partner support' },
-];
+
 
 const MENU_ROUTES: Record<string, Href> = {
-  'Vehicle Details': '/settings',
   Documents: '/documents',
   'KYC Verification': '/kyc',
   'Payout Methods': '/settings',
@@ -34,6 +28,18 @@ export default function ProfileScreen() {
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const router = useRouter();
+  const { user, logout } = useAuth();
+
+  const displayType = user?.vehicleType 
+    ? user.vehicleType.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) 
+    : 'Vehicle';
+
+  const MENU_ITEMS = [
+    { icon: 'description', title: 'Documents', subtitle: 'RC Book, Insurance, License' },
+    { icon: 'fingerprint', title: 'KYC Verification', subtitle: 'Aadhaar, PAN, Bank, Selfie' },
+    { icon: 'account-balance', title: 'Payout Methods', subtitle: 'HDFC Bank ending in 4321' },
+    { icon: 'support-agent', title: 'Help & Support', subtitle: 'Contact partner support' },
+  ];
 
   const handleMenuPress = (title: string) => {
     router.push(MENU_ROUTES[title] ?? '/settings');
@@ -51,8 +57,8 @@ export default function ProfileScreen() {
           <View style={styles.avatarWrap}>
             <MaterialIcon name="account-circle" size={80} color={colors.primary} />
           </View>
-          <Text style={styles.driverName}>Rajesh Kumar</Text>
-          <Text style={styles.joinedText}>Partner since Jan 2024</Text>
+          <Text style={styles.driverName}>{user?.name || user?.phone || 'Partner'}</Text>
+          <Text style={styles.joinedText}>Partner since Jan 2024 • {displayType}</Text>
           
           <View style={styles.badgesRow}>
             <View style={styles.badge}>
@@ -98,7 +104,10 @@ export default function ProfileScreen() {
         </View>
 
         {/* Logout */}
-        <TouchableOpacity style={styles.logoutBtn} activeOpacity={0.8} onPress={() => router.replace('/login')}>
+        <TouchableOpacity style={styles.logoutBtn} activeOpacity={0.8} onPress={async () => {
+          await logout();
+          router.replace('/login');
+        }}>
           <MaterialIcon name="logout" size={20} color={colors.accentRed} />
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>

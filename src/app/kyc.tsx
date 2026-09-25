@@ -48,7 +48,7 @@ export default function KYCScreen() {
         activeOpacity={0.8}
       >
         <View style={[styles.stepIconWrap, isDone && styles.stepIconWrapDone]}>
-          <MaterialIcon name={icon} size={24} color={isDone ? colors.onPrimary : colors.primary} />
+          <MaterialIcon name={icon as any} size={24} color={isDone ? colors.onPrimary : colors.primary} />
         </View>
         
         <View style={styles.stepContent}>
@@ -98,7 +98,7 @@ export default function KYCScreen() {
         <DocumentStep 
           title="Driving License" 
           subtitle="Front and Back photos" 
-          icon="id-card" 
+          icon="credit-card" 
           isDone={licenseDone} 
           onPress={() => setLicenseDone(!licenseDone)}
         />

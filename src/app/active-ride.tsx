@@ -14,6 +14,8 @@ import { fonts, type, spacing, radius } from '../theme/typography';
 import RealMap from '../components/RealMap';
 import MaterialIcon from '../components/MaterialIcon';
 import SwipeButton from '../components/SwipeButton';
+import { useLocalSearchParams } from 'expo-router';
+import { socketService } from '../utils/socket';
 
 // Mock passenger data
 const PASSENGER = {
@@ -31,6 +33,7 @@ export default function ActiveRideScreen() {
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const router = useRouter();
+  const { rideId } = useLocalSearchParams();
   const [rideState, setRideState] = useState<RideState>('EN_ROUTE_PICKUP');
 
   const handleSlideAction = () => {
@@ -40,6 +43,9 @@ export default function ActiveRideScreen() {
       setRideState('EN_ROUTE_DROPOFF');
     } else {
       // Complete ride and go back to home
+      if (rideId) {
+        socketService.emit('complete_ride', { rideId });
+      }
       router.replace('/(tabs)/home');
     }
   };
@@ -151,17 +157,17 @@ export default function ActiveRideScreen() {
             <TouchableOpacity style={styles.circleBtn}>
               <MaterialIcon name="call" size={20} color={colors.onSurface} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.circleBtn}>
+            <TouchableOpacity style={styles.circleBtn} onPress={() => router.push({ pathname: '/chat', params: { rideId: rideId || 'test_ride' } })}>
               <MaterialIcon name="chat" size={20} color={colors.onSurface} />
             </TouchableOpacity>
           </View>
         </View>
 
         {/* Custom Interactive Swipe Button */}
-        <SwipeButton 
+        <SwipeButton
           key={rideState}
-          title={getButtonText()} 
-          onComplete={handleSlideAction} 
+          title={getButtonText()}
+          onComplete={handleSlideAction}
           color={getButtonColor()}
           targetColor={getTargetColor()}
         />

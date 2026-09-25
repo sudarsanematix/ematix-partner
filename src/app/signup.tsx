@@ -10,8 +10,9 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../theme/ThemeProvider';
+import { useAuth } from '../context/AuthContext';
 import { fonts, type, spacing, radius } from '../theme/typography';
 import MaterialIcon from '../components/MaterialIcon';
 
@@ -21,19 +22,46 @@ export default function SignupScreen() {
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const { login } = useAuth();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState((params.phone as string) || '');
   const [vehicle, setVehicle] = useState<VehicleType | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const phoneValid = phone.replace(/\D/g, '').length === 10;
   const isFormValid = name.trim().length > 2 && email.includes('@') && phoneValid && vehicle !== null;
 
-  const handleSignup = () => {
+  const handleSignup = async () => {
     if (!isFormValid) return;
-    // Route to KYC
-    router.push('/kyc');
+    setLoading(true);
+    setErrorMsg('');
+    try {
+      // Map frontend vehicle types to backend enum
+      let dbVehicleType = 'bike';
+      if (vehicle === 'Auto') dbVehicleType = 'auto';
+      if (vehicle === 'Cab') dbVehicleType = 'prime_sedan';
+
+      const response = await fetch('http://192.168.1.34:4000/api/auth/partner/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, name, email, vehicleType: dbVehicleType })
+      });
+      const data = await response.json();
+      if (data.success) {
+        await login(data.user, data.token);
+        router.replace('/kyc');
+      } else {
+        setErrorMsg(data.error || 'Registration failed');
+      }
+    } catch (e: any) {
+      setErrorMsg(e.message || 'Network error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const VehicleOption = ({ type, icon, label }: { type: VehicleType; icon: string; label: string }) => {
@@ -44,10 +72,10 @@ export default function SignupScreen() {
         onPress={() => setVehicle(type)}
         activeOpacity={0.7}
       >
-        <MaterialIcon 
-          name={icon} 
-          size={32} 
-          color={isSelected ? colors.primary : colors.textMuted} 
+        <MaterialIcon
+          name={icon as any}
+          size={32}
+          color={isSelected ? colors.primary : colors.textMuted}
         />
         <Text style={[styles.vehicleLabel, isSelected && styles.vehicleLabelSelected]}>{label}</Text>
         {isSelected && (
@@ -75,7 +103,7 @@ export default function SignupScreen() {
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          
+
           <Text style={styles.title}>Join Ematix Delivery</Text>
           <Text style={styles.subtitle}>Tell us a bit about yourself and your vehicle to get started.</Text>
 

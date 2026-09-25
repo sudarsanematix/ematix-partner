@@ -16,13 +16,17 @@ import RealMap from '../../components/RealMap';
 import MaterialIcon from '../../components/MaterialIcon';
 import SwipeButton from '../../components/SwipeButton';
 import AnimatedWifiIcon from '../../components/AnimatedWifiIcon';
+import { socketService } from '../../utils/socket';
+import { useAuth } from '../../context/AuthContext';
 
 export default function HomeScreen() {
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const router = useRouter();
+  const { user } = useAuth();
   const [isOnline, setIsOnline] = useState(false);
   const [hasRequest, setHasRequest] = useState(false);
+  const [currentRequest, setCurrentRequest] = useState<any>(null);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const greeting = () => {
@@ -32,27 +36,36 @@ export default function HomeScreen() {
     return 'Good Evening';
   };
 
-  // Toggle online state and simulate a ride request popping up 3 seconds after going online
+  // Toggle online state and connect to socket
   const handleToggleOnline = () => {
     const newState = !isOnline;
     setIsOnline(newState);
     if (newState) {
-      requestTimer.current = setTimeout(() => setHasRequest(true), 3000);
+      socketService.connect();
+      socketService.on('new_ride_request', (data: any) => {
+        console.log('[Partner App] Received ride request:', data);
+        setCurrentRequest(data);
+        setHasRequest(true);
+      });
+      socketService.on('ride_unavailable', (data: any) => {
+        if (currentRequest && currentRequest.id === data.rideId) {
+          setHasRequest(false);
+          setCurrentRequest(null);
+        }
+      });
     } else {
       setHasRequest(false);
-      if (requestTimer.current) {
-        clearTimeout(requestTimer.current);
-        requestTimer.current = null;
-      }
+      setCurrentRequest(null);
+      socketService.off('new_ride_request');
+      socketService.off('ride_unavailable');
+      socketService.disconnect();
     }
   };
 
   useEffect(() => {
     return () => {
-      if (requestTimer.current) {
-        clearTimeout(requestTimer.current);
-        requestTimer.current = null;
-      }
+      socketService.off('new_ride_request');
+      socketService.off('ride_unavailable');
     };
   }, []);
 
@@ -61,7 +74,7 @@ export default function HomeScreen() {
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>
-            <Text style={styles.greeting}>{`${greeting()}, Rajesh`}</Text>
+            <Text style={styles.greeting}>{`${greeting()}, ${user?.name || user?.phone || 'Partner'}`}</Text>
             <View style={styles.ratingBadge}>
               <MaterialIcon name="star" size={14} color="#F59E0B" />
               <Text style={styles.ratingText}>4.92</Text>
@@ -186,16 +199,16 @@ export default function HomeScreen() {
             
             <View style={styles.requestRow}>
               <View style={styles.timeBox}>
-                <Text style={styles.timeMins}>2</Text>
+                <Text style={styles.timeMins}>{currentRequest?.eta ? parseInt(currentRequest.eta) : 2}</Text>
                 <Text style={styles.timeUnit}>min away</Text>
               </View>
               <View style={styles.requestRoute}>
-                <Text style={styles.pickupText}>Phoenix Marketcity</Text>
-                <Text style={styles.dropoffText}>→ Anna Nagar Tower</Text>
+                <Text style={styles.pickupText}>{currentRequest?.pickup || 'Phoenix Marketcity'}</Text>
+                <Text style={styles.dropoffText}>→ {currentRequest?.dropoff || 'Anna Nagar Tower'}</Text>
               </View>
               <View style={styles.fareBox}>
-                <Text style={styles.fareAmt}>₹320</Text>
-                <Text style={styles.fareLabel}>Cash</Text>
+                <Text style={styles.fareAmt}>₹{currentRequest?.price || '320'}</Text>
+                <Text style={styles.fareLabel}>{currentRequest?.type === 'parcel' ? 'Delivery' : 'Cash'}</Text>
               </View>
             </View>
 
@@ -204,8 +217,9 @@ export default function HomeScreen() {
                 <Text style={styles.declineText}>Decline</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.acceptBtn} onPress={() => {
+                socketService.emit('accept_ride', { rideId: currentRequest?.id });
                 setHasRequest(false);
-                router.push('/active-ride');
+                router.push(`/active-ride?rideId=${currentRequest?.id}`);
               }}>
                 <Text style={styles.acceptText}>Accept Ride</Text>
               </TouchableOpacity>
