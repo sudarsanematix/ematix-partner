@@ -1,10 +1,10 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   Platform,
   Modal,
@@ -20,6 +20,7 @@ import AnimatedWifiIcon from '../../components/AnimatedWifiIcon';
 import { socketService } from '../../utils/socket';
 import { useAuth } from '../../context/AuthContext';
 import { formatFare } from '../../utils/phone';
+import * as Location from 'expo-location';
 
 export default function HomeScreen() {
   const { colors } = useTheme();
@@ -29,6 +30,7 @@ export default function HomeScreen() {
   const [hasRequest, setHasRequest] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [currentRequest, setCurrentRequest] = useState<any>(null);
+  const [myLocation, setMyLocation] = useState<{ latitude: number, longitude: number } | null>(null);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestRef = useRef<any>(null);
 
@@ -49,16 +51,59 @@ export default function HomeScreen() {
     setAccepting(false);
   };
 
+  const locateMe = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+        setMyLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+      }
+    } catch (err) {
+      // Silently ignore if location services are disabled, to avoid yellow box warnings
+    }
+  };
+
+  // Run once on mount to get initial location
+  useEffect(() => {
+    locateMe();
+  }, []);
+
   // Keep socket connection and request listeners active whenever partner is online
   useEffect(() => {
+
     if (isOnline) {
       socketService.connect();
+      socketService.emit('get_pending_rides', {});
 
       const handleNewRideRequest = (data: any) => {
         console.log('[Partner App] Received ride request:', data);
         setCurrentRequest(data);
         setHasRequest(true);
       };
+
+      // Track real live location
+      let locationSubscription: Location.LocationSubscription | null = null;
+      (async () => {
+        try {
+          locationSubscription = await Location.watchPositionAsync(
+            { accuracy: Location.Accuracy.Highest, timeInterval: 5000, distanceInterval: 5 },
+            (loc) => {
+              const { latitude, longitude } = loc.coords;
+              setMyLocation({ latitude, longitude });
+              if (user?.id) {
+                socketService.emit('update_location', {
+                  partnerId: user.id,
+                  lat: latitude,
+                  lng: longitude,
+                  vehicleType: user.vehicleType || 'bike'
+                });
+              }
+            }
+          );
+        } catch (err) {
+          console.warn('Watch location error:', err);
+        }
+      })();
 
       const handleRideUnavailable = (data: any) => {
         if (requestRef.current && requestRef.current.id === data.rideId) {
@@ -87,6 +132,9 @@ export default function HomeScreen() {
       socketService.on('ride_error', handleRideError);
 
       return () => {
+        if (locationSubscription) {
+          locationSubscription.remove();
+        }
         socketService.off('new_ride_request', handleNewRideRequest);
         socketService.off('ride_unavailable', handleRideUnavailable);
         socketService.off('ride_assigned', handleRideAssigned);
@@ -177,7 +225,23 @@ export default function HomeScreen() {
             <Text style={styles.mapTitle}>Live Hotspots</Text>
           </View>
           <View style={styles.mapContainer}>
-            <RealMap interactive={false} style={styles.mapImage} />
+            <RealMap 
+              style={styles.mapImage} 
+              interactive={true} 
+              region={myLocation ? { latitude: myLocation.latitude, longitude: myLocation.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 } : undefined}
+              markers={
+                isOnline && myLocation
+                  ? [{ id: 'me', latitude: myLocation.latitude, longitude: myLocation.longitude, color: '#007AFF' }]
+                  : []
+              }
+            />
+            <TouchableOpacity 
+              style={{ position: 'absolute', bottom: 16, right: 16, backgroundColor: colors.surface, width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 }}
+              activeOpacity={0.8}
+              onPress={locateMe}
+            >
+              <MaterialIcon name="my-location" size={24} color={colors.primary} />
+            </TouchableOpacity>
 
             {/* Mock Hotspot Overlay */}
             {isOnline && (
@@ -190,16 +254,18 @@ export default function HomeScreen() {
         </View>
 
         {/* Verification banner */}
-        <TouchableOpacity style={styles.kycBanner} activeOpacity={0.85} onPress={() => router.push('/kyc')}>
-          <View style={styles.kycBannerIcon}>
-            <MaterialIcon name="verified-user" size={22} color={colors.onPrimary} />
-          </View>
-          <View style={styles.kycBannerText}>
-            <Text style={styles.kycBannerTitle}>Complete your KYC</Text>
-            <Text style={styles.kycBannerSub}>2 of 5 steps done · unlock your first payout</Text>
-          </View>
-          <MaterialIcon name="chevron-right" size={20} color={colors.onPrimaryContainer} />
-        </TouchableOpacity>
+        {user?.kycStatus !== 'approved' && (
+          <TouchableOpacity style={styles.kycBanner} activeOpacity={0.85} onPress={() => router.push('/kyc')}>
+            <View style={styles.kycBannerIcon}>
+              <MaterialIcon name="verified-user" size={22} color={colors.onPrimary} />
+            </View>
+            <View style={styles.kycBannerText}>
+              <Text style={styles.kycBannerTitle}>Complete your KYC</Text>
+              <Text style={styles.kycBannerSub}>2 of 5 steps done · unlock your first payout</Text>
+            </View>
+            <MaterialIcon name="chevron-right" size={20} color={colors.onPrimaryContainer} />
+          </TouchableOpacity>
+        )}
 
         {/* Quick Stats */}
         <Text style={styles.sectionTitle}>Today's Progress</Text>

@@ -39,17 +39,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [storedToken, storedUser, storedOnline] = await Promise.all([
+        const [storedToken, storedUser] = await Promise.all([
           AsyncStorage.getItem('@ematix_partner_token'),
           AsyncStorage.getItem('@ematix_partner_user'),
-          AsyncStorage.getItem('@ematix_partner_is_online'),
         ]);
         if (storedToken && storedUser) {
           setToken(storedToken);
           setUser(JSON.parse(storedUser));
-        }
-        if (storedOnline === 'true') {
-          setIsOnlineState(true);
         }
       } catch (error) {
         console.error('[Auth] Failed to restore session', error);
@@ -61,16 +57,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const setIsOnline = async (online: boolean) => {
     setIsOnlineState(online);
-    try {
-      await AsyncStorage.setItem('@ematix_partner_is_online', online ? 'true' : 'false');
-    } catch (e) {
-      console.error('[Auth] Failed to set online state', e);
-    }
   };
 
   const login = async (userData: User, authToken: string) => {
     setUser(userData);
     setToken(authToken);
+    setIsOnlineState(false);
     await AsyncStorage.setItem('@ematix_partner_token', authToken);
     await AsyncStorage.setItem('@ematix_partner_user', JSON.stringify(userData));
   };
@@ -82,7 +74,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await Promise.all([
       AsyncStorage.removeItem('@ematix_partner_token'),
       AsyncStorage.removeItem('@ematix_partner_user'),
-      AsyncStorage.removeItem('@ematix_partner_is_online'),
     ]);
   };
 

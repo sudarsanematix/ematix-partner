@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -6,7 +7,6 @@ import {
   TouchableOpacity,
   TextInput,
   Modal,
-  SafeAreaView,
   Platform,
   Animated,
 } from 'react-native';
