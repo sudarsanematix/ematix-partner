@@ -40,13 +40,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [storedToken, storedUser] = await Promise.all([
+        const [storedToken, storedUser, storedOnline] = await Promise.all([
           AsyncStorage.getItem('@ematix_partner_token'),
           AsyncStorage.getItem('@ematix_partner_user'),
+          AsyncStorage.getItem('@ematix_partner_online'),
         ]);
         if (storedToken && storedUser) {
           setToken(storedToken);
           setUser(JSON.parse(storedUser));
+          if (storedOnline === 'true') {
+            setIsOnlineState(true);
+          }
           // The socket handshake requires this token, so it must be handed
           // over before any ride screen mounts.
           socketService.setToken(storedToken);
@@ -61,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const setIsOnline = async (online: boolean) => {
     setIsOnlineState(online);
+    await AsyncStorage.setItem('@ematix_partner_online', String(online));
   };
 
   const login = async (userData: User, authToken: string) => {
@@ -69,6 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsOnlineState(false);
     await AsyncStorage.setItem('@ematix_partner_token', authToken);
     await AsyncStorage.setItem('@ematix_partner_user', JSON.stringify(userData));
+    await AsyncStorage.setItem('@ematix_partner_online', 'false');
     socketService.setToken(authToken);
   };
 
@@ -79,6 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await Promise.all([
       AsyncStorage.removeItem('@ematix_partner_token'),
       AsyncStorage.removeItem('@ematix_partner_user'),
+      AsyncStorage.removeItem('@ematix_partner_online'),
     ]);
     socketService.disconnect();
     socketService.setToken(null);

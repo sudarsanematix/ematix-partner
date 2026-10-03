@@ -91,7 +91,7 @@ export default function RealMap({ style, region = CHENNAI_REGION, interactive = 
   useEffect(() => {
     safePostMessage({ type: 'updateMarkers', markersJs });
   }, [markersJs]);
-  
+
   const htmlContent = useMemo(() => {
 
     // Generate Route JS
@@ -198,19 +198,25 @@ export default function RealMap({ style, region = CHENNAI_REGION, interactive = 
       .pulse-hotspot {
         width: 24px;
         height: 24px;
-        background-color: rgba(250, 204, 21, 0.4); /* FACC15 but translucent */
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .pulse-hotspot::before {
+        content: "";
+        position: absolute;
+        width: 24px;
+        height: 24px;
+        background-color: rgba(250, 204, 21, 0.4);
         border: 2px solid #FACC15;
         border-radius: 50%;
-        position: relative;
         box-shadow: 0 0 10px rgba(250, 204, 21, 0.5);
         animation: hotspotPulse 2s infinite ease-in-out;
       }
       .pulse-hotspot::after {
         content: "";
         position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
         width: 8px;
         height: 8px;
         background-color: #FACC15;
@@ -277,10 +283,10 @@ export default function RealMap({ style, region = CHENNAI_REGION, interactive = 
         marginHeight={0}
         marginWidth={0}
         srcDoc={htmlContent}
-        style={{ 
-          border: 0, 
-          position: 'absolute', 
-          top: 0, 
+        style={{
+          border: 0,
+          position: 'absolute',
+          top: 0,
           left: 0,
           pointerEvents: interactive ? 'auto' : 'none'
         }}

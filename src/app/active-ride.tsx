@@ -213,7 +213,7 @@ export default function ActiveRideScreen() {
       if (!data) return;
       clearVerifyTimer();
       setIsVerifying(false);
-      if (data.code === 'ride_not_found') {
+      if (data.code === 'ride_not_found' || data.code === 'unauthorized') {
         setShowOtpModal(false);
         setOtpError('');
         router.replace('/(tabs)/home');
@@ -253,6 +253,12 @@ export default function ActiveRideScreen() {
       router.replace('/(tabs)/home');
     };
 
+    const handleRideCancelled = (data: any) => {
+      const targetId = getTargetRideId(data);
+      if (!data || (targetId && String(targetId) !== String(rideId))) return;
+      router.replace('/(tabs)/home');
+    };
+
     const handleOtpError = (data: any) => {
       clearVerifyTimer();
       setOtpError(data?.message || 'Invalid PIN. Please try again.');
@@ -266,6 +272,7 @@ export default function ActiveRideScreen() {
     socketService.on('ride_status_updated', handleRideStatus);
     socketService.on('ride_started', handleRideStarted);
     socketService.on('ride_completed', handleRideCompleted);
+    socketService.on('ride_cancelled', handleRideCancelled);
     socketService.on('otp_error', handleOtpError);
 
     return () => {
@@ -276,6 +283,7 @@ export default function ActiveRideScreen() {
       socketService.off('ride_status_updated', handleRideStatus);
       socketService.off('ride_started', handleRideStarted);
       socketService.off('ride_completed', handleRideCompleted);
+      socketService.off('ride_cancelled', handleRideCancelled);
       socketService.off('otp_error', handleOtpError);
     };
   }, [rideId, user?.id]);

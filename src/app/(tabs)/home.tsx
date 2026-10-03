@@ -100,7 +100,7 @@ export default function HomeScreen() {
             (loc) => {
               const { latitude, longitude, accuracy } = loc.coords;
               setMyLocation({ latitude, longitude });
-              
+
               // Cache valid GPS fix for next startup (distanceInterval prevents spam)
               if (accuracy && accuracy < 1000) {
                 AsyncStorage.setItem('@last_known_location', JSON.stringify({
@@ -108,7 +108,7 @@ export default function HomeScreen() {
                   longitude,
                   latitudeDelta: 0.05,
                   longitudeDelta: 0.05
-                })).catch(() => {});
+                })).catch(() => { });
               }
 
               if (user?.id) {
@@ -216,10 +216,10 @@ export default function HomeScreen() {
               <MaterialIcon name="notifications" size={24} color={colors.onSurface} />
               <View style={styles.notificationDot} />
             </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.profileBtn} 
-              accessibilityLabel="Profile" 
-              accessibilityRole="button" 
+            <TouchableOpacity
+              style={styles.profileBtn}
+              accessibilityLabel="Profile"
+              accessibilityRole="button"
               hitSlop={8}
               onPress={async () => {
                 await logout();
@@ -245,7 +245,7 @@ export default function HomeScreen() {
             </Text>
           </TouchableOpacity>
         ) : (
-          <SwipeButton 
+          <SwipeButton
             key="offline-slider"
             title="Slide to Go Online"
             onComplete={handleToggleOnline}
@@ -259,8 +259,8 @@ export default function HomeScreen() {
         )}
       </View>
 
-      <ScrollView 
-        showsVerticalScrollIndicator={false} 
+      <ScrollView
+        showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         scrollEnabled={!mapScrollLock}
       >
@@ -270,33 +270,33 @@ export default function HomeScreen() {
             <MaterialIcon name="local-fire-department" size={20} color={colors.accentRed} />
             <Text style={styles.mapTitle}>Live Hotspots</Text>
           </View>
-          <View 
+          <View
             style={styles.mapContainer}
             onTouchStart={() => setMapScrollLock(true)}
             onTouchEnd={() => setMapScrollLock(false)}
             onTouchCancel={() => setMapScrollLock(false)}
           >
             {bootRegion ? (
-              <RealMap 
-                style={styles.mapImage}  
-                interactive={true} 
+              <RealMap
+                style={styles.mapImage}
+                interactive={true}
                 region={myLocation ? { latitude: myLocation.latitude, longitude: myLocation.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 } : bootRegion}
                 markers={[
-                ...(isOnline && myLocation
-                  ? [{ id: 'me', latitude: myLocation.latitude, longitude: myLocation.longitude, color: mapTheme.onBase }]
-                  : []),
-                ...(isOnline && highDemandZones
-                  ? highDemandZones.map((zone, i) => ({
+                  ...(myLocation
+                    ? [{ id: 'me', latitude: myLocation.latitude, longitude: myLocation.longitude, color: mapTheme.onBase }]
+                    : []),
+                  ...(isOnline && highDemandZones
+                    ? highDemandZones.map((zone, i) => ({
                       id: `hotspot-${i}`,
                       latitude: zone.latitude,
                       longitude: zone.longitude,
                       color: '#FACC15',
                     }))
-                  : [])
-              ]}
-            />
+                    : [])
+                ]}
+              />
             ) : null}
-            <TouchableOpacity 
+            <TouchableOpacity
               style={{ position: 'absolute', bottom: 16, right: 16, backgroundColor: colors.surface, width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 }}
               activeOpacity={0.8}
               onPress={locateMe}
@@ -406,12 +406,12 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.requestActions}>
-<TouchableOpacity style={styles.declineBtn} onPress={closeRequest}>
+              <TouchableOpacity style={styles.declineBtn} onPress={closeRequest}>
                 <Text style={styles.declineText}>Decline</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.acceptBtn} onPress={acceptRide} disabled={accepting}>
-                  <Text style={styles.acceptText}>{accepting ? 'Accepting...' : 'Accept Ride'}</Text>
-                </TouchableOpacity>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.acceptBtn} onPress={acceptRide} disabled={accepting}>
+                <Text style={styles.acceptText}>{accepting ? 'Accepting...' : 'Accept Ride'}</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>

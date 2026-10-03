@@ -45,7 +45,7 @@ export default function RealMap({ style, region = CHENNAI_REGION, interactive = 
   const theme = useMemo(() => buildMapTheme(isDark), [isDark]);
   const webViewRef = useRef<WebView>(null);
   const bootRegionRef = useRef(region);
-  
+
   const markersKey = JSON.stringify(markers);
   const routeKey = JSON.stringify(routeCoordinates);
   const regionKey = JSON.stringify(region);
@@ -68,24 +68,24 @@ export default function RealMap({ style, region = CHENNAI_REGION, interactive = 
       window.appMarkers.forEach(m => m.remove());
       window.appMarkers = [];
       ${markers.map(marker => {
-        if (marker.id === 'me' || marker.id === 'partner') {
-          return `
+      if (marker.id === 'me' || marker.id === 'partner') {
+        return `
             var el = document.createElement('div');
             el.className = 'pulse-marker';
             window.appMarkers.push(new mapboxgl.Marker(el).setLngLat([${marker.longitude}, ${marker.latitude}]).addTo(map));
           `;
-        } else if (marker.id.startsWith('hotspot')) {
-          return `
+      } else if (marker.id.startsWith('hotspot')) {
+        return `
             var el = document.createElement('div');
             el.className = 'pulse-hotspot';
             window.appMarkers.push(new mapboxgl.Marker(el).setLngLat([${marker.longitude}, ${marker.latitude}]).addTo(map));
           `;
-        } else {
-          return `
+      } else {
+        return `
             window.appMarkers.push(new mapboxgl.Marker({ color: '${marker.color || '#000000'}' }).setLngLat([${marker.longitude}, ${marker.latitude}]).addTo(map));
           `;
-        }
-      }).join('\n')}
+      }
+    }).join('\n')}
     `;
   }, [markersKey]);
 
@@ -282,10 +282,10 @@ export default function RealMap({ style, region = CHENNAI_REGION, interactive = 
 
   return (
     <View style={[styles.container, { backgroundColor: theme.base }, style]}>
-      <WebView 
+      <WebView
         ref={webViewRef}
         key={isDark ? 'dark' : 'light'}
-        source={{ html: htmlContent, baseUrl: 'https://localhost/' }} 
+        source={{ html: htmlContent, baseUrl: 'https://localhost/' }}
         style={StyleSheet.absoluteFill}
         showsHorizontalScrollIndicator={false}
         showsVerticalScrollIndicator={false}
