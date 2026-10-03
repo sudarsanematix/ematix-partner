@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { socketService } from '../utils/socket';
 
 type User = {
   id: string;
@@ -46,6 +47,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (storedToken && storedUser) {
           setToken(storedToken);
           setUser(JSON.parse(storedUser));
+          // The socket handshake requires this token, so it must be handed
+          // over before any ride screen mounts.
+          socketService.setToken(storedToken);
         }
       } catch (error) {
         console.error('[Auth] Failed to restore session', error);
@@ -65,6 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsOnlineState(false);
     await AsyncStorage.setItem('@ematix_partner_token', authToken);
     await AsyncStorage.setItem('@ematix_partner_user', JSON.stringify(userData));
+    socketService.setToken(authToken);
   };
 
   const logout = async () => {
@@ -75,6 +80,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       AsyncStorage.removeItem('@ematix_partner_token'),
       AsyncStorage.removeItem('@ematix_partner_user'),
     ]);
+    socketService.disconnect();
+    socketService.setToken(null);
   };
 
   return (

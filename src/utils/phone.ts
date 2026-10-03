@@ -25,7 +25,9 @@ export function telLink(phone?: string | null): string | null {
 export function formatFare(price?: number | string | null): string {
   if (price == null) return '—';
   if (typeof price === 'number') return `₹${price}`;
-  const str = String(price).trim();
-  if (/^[₹$€£]/.test(str)) return str;
+  
+  // Strip any existing currency symbols from the string, then prepend ₹
+  let str = String(price).trim();
+  str = str.replace(/^[₹$€£]/, '').trim();
   return `₹${str}`;
 }

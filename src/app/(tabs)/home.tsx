@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../theme/ThemeProvider';
+import { buildMapTheme, type MapThemeTokens } from '../../theme/mapTheme';
 import { fonts, type, spacing, radius } from '../../theme/typography';
 import RealMap from '../../components/RealMap';
 import MaterialIcon from '../../components/MaterialIcon';
@@ -21,16 +22,22 @@ import { socketService } from '../../utils/socket';
 import { useAuth } from '../../context/AuthContext';
 import { formatFare } from '../../utils/phone';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CHENNAI_REGION } from '../../components/RealMap';
 
 export default function HomeScreen() {
-  const { colors } = useTheme();
-  const styles = createStyles(colors);
+  const { colors, isDark } = useTheme();
+  const mapTheme = buildMapTheme(isDark);
+  const styles = createStyles(colors, mapTheme);
   const router = useRouter();
   const { user, logout, isOnline, setIsOnline } = useAuth();
   const [hasRequest, setHasRequest] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [currentRequest, setCurrentRequest] = useState<any>(null);
   const [myLocation, setMyLocation] = useState<{ latitude: number, longitude: number } | null>(null);
+  const [bootRegion, setBootRegion] = useState<{ latitude: number, longitude: number, latitudeDelta: number, longitudeDelta: number } | null>(null);
+  const [mapScrollLock, setMapScrollLock] = useState(false);
+  const [highDemandZones, setHighDemandZones] = useState<any[]>([]);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestRef = useRef<any>(null);
 
@@ -73,12 +80,15 @@ export default function HomeScreen() {
 
     if (isOnline) {
       socketService.connect();
-      socketService.emit('get_pending_rides', {});
 
       const handleNewRideRequest = (data: any) => {
         console.log('[Partner App] Received ride request:', data);
         setCurrentRequest(data);
         setHasRequest(true);
+      };
+
+      const handleHotspots = (hotspots: any[]) => {
+        setHighDemandZones(hotspots || []);
       };
 
       // Track real live location
@@ -88,8 +98,19 @@ export default function HomeScreen() {
           locationSubscription = await Location.watchPositionAsync(
             { accuracy: Location.Accuracy.Highest, timeInterval: 5000, distanceInterval: 5 },
             (loc) => {
-              const { latitude, longitude } = loc.coords;
+              const { latitude, longitude, accuracy } = loc.coords;
               setMyLocation({ latitude, longitude });
+              
+              // Cache valid GPS fix for next startup (distanceInterval prevents spam)
+              if (accuracy && accuracy < 1000) {
+                AsyncStorage.setItem('@last_known_location', JSON.stringify({
+                  latitude,
+                  longitude,
+                  latitudeDelta: 0.05,
+                  longitudeDelta: 0.05
+                })).catch(() => {});
+              }
+
               if (user?.id) {
                 socketService.emit('update_location', {
                   partnerId: user.id,
@@ -130,6 +151,10 @@ export default function HomeScreen() {
       socketService.on('ride_unavailable', handleRideUnavailable);
       socketService.on('ride_assigned', handleRideAssigned);
       socketService.on('ride_error', handleRideError);
+      socketService.on('hotspots_data', handleHotspots);
+
+      socketService.emit('get_pending_rides', {});
+      socketService.emit('get_hotspots', {});
 
       return () => {
         if (locationSubscription) {
@@ -139,6 +164,7 @@ export default function HomeScreen() {
         socketService.off('ride_unavailable', handleRideUnavailable);
         socketService.off('ride_assigned', handleRideAssigned);
         socketService.off('ride_error', handleRideError);
+        socketService.off('hotspots_data', handleHotspots);
       };
     } else {
       closeRequest();
@@ -146,9 +172,26 @@ export default function HomeScreen() {
       socketService.off('ride_unavailable');
       socketService.off('ride_assigned');
       socketService.off('ride_error');
+      socketService.off('hotspots_data');
       socketService.disconnect();
     }
   }, [isOnline, router]);
+
+  useEffect(() => {
+    const loadCache = async () => {
+      try {
+        const cached = await AsyncStorage.getItem('@last_known_location');
+        if (cached) {
+          setBootRegion(JSON.parse(cached));
+        } else {
+          setBootRegion(CHENNAI_REGION);
+        }
+      } catch (e) {
+        setBootRegion(CHENNAI_REGION);
+      }
+    };
+    loadCache();
+  }, []);
 
   // Toggle online state explicitly requested by user
   const handleToggleOnline = async () => {
@@ -216,25 +259,43 @@ export default function HomeScreen() {
         )}
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-
+      <ScrollView 
+        showsVerticalScrollIndicator={false} 
+        contentContainerStyle={styles.scrollContent}
+        scrollEnabled={!mapScrollLock}
+      >
         {/* Map Card */}
         <View style={styles.mapCard}>
           <View style={styles.mapHeader}>
             <MaterialIcon name="local-fire-department" size={20} color={colors.accentRed} />
             <Text style={styles.mapTitle}>Live Hotspots</Text>
           </View>
-          <View style={styles.mapContainer}>
-            <RealMap 
-              style={styles.mapImage} 
-              interactive={true} 
-              region={myLocation ? { latitude: myLocation.latitude, longitude: myLocation.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 } : undefined}
-              markers={
-                isOnline && myLocation
-                  ? [{ id: 'me', latitude: myLocation.latitude, longitude: myLocation.longitude, color: '#007AFF' }]
-                  : []
-              }
+          <View 
+            style={styles.mapContainer}
+            onTouchStart={() => setMapScrollLock(true)}
+            onTouchEnd={() => setMapScrollLock(false)}
+            onTouchCancel={() => setMapScrollLock(false)}
+          >
+            {bootRegion ? (
+              <RealMap 
+                style={styles.mapImage}  
+                interactive={true} 
+                region={myLocation ? { latitude: myLocation.latitude, longitude: myLocation.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 } : bootRegion}
+                markers={[
+                ...(isOnline && myLocation
+                  ? [{ id: 'me', latitude: myLocation.latitude, longitude: myLocation.longitude, color: mapTheme.onBase }]
+                  : []),
+                ...(isOnline && highDemandZones
+                  ? highDemandZones.map((zone, i) => ({
+                      id: `hotspot-${i}`,
+                      latitude: zone.latitude,
+                      longitude: zone.longitude,
+                      color: '#FACC15',
+                    }))
+                  : [])
+              ]}
             />
+            ) : null}
             <TouchableOpacity 
               style={{ position: 'absolute', bottom: 16, right: 16, backgroundColor: colors.surface, width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 }}
               activeOpacity={0.8}
@@ -243,18 +304,18 @@ export default function HomeScreen() {
               <MaterialIcon name="my-location" size={24} color={colors.primary} />
             </TouchableOpacity>
 
-            {/* Mock Hotspot Overlay */}
-            {isOnline && (
+            {/* Dynamic Hotspot Overlay */}
+            {isOnline && highDemandZones && highDemandZones.length > 0 && (
               <View style={styles.hotspotPill}>
                 <View style={styles.hotspotDot} />
-                <Text style={styles.hotspotText}>High demand in T. Nagar</Text>
+                <Text style={styles.hotspotText}>High demand in {highDemandZones[0].area}</Text>
               </View>
             )}
           </View>
         </View>
 
         {/* Verification banner */}
-        {user?.kycStatus !== 'approved' && (
+        {user?.kycStatus !== 'approved' && user?.kycStatus !== 'completed' && (
           <TouchableOpacity style={styles.kycBanner} activeOpacity={0.85} onPress={() => router.push('/kyc')}>
             <View style={styles.kycBannerIcon}>
               <MaterialIcon name="verified-user" size={22} color={colors.onPrimary} />
@@ -309,10 +370,25 @@ export default function HomeScreen() {
         <View style={styles.requestSheetOverlay}>
           <View style={styles.requestSheet}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.requestTitle}>New Ride Request</Text>
+            <Text style={styles.requestTitle}>
+              {currentRequest?.type === 'parcel' ? 'New Parcel Delivery' : 'New Ride Request'}
+            </Text>
             {currentRequest?.customer?.name ? (
-              <Text style={styles.requestCustomer}>from {currentRequest.customer.name}</Text>
+              <Text style={styles.requestCustomer}>
+                from {currentRequest.customer.name}
+              </Text>
             ) : null}
+
+            {currentRequest?.type === 'parcel' && currentRequest?.packageDetails && (
+              <View style={{ backgroundColor: 'rgba(0,33,124,0.05)', padding: 12, borderRadius: 8, marginVertical: 8 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.primary, marginBottom: 4 }}>
+                  📦 {currentRequest.packageDetails.weightTier.toUpperCase()} • {currentRequest.packageDetails.category}
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.textMuted }}>
+                  Receiver: {currentRequest.packageDetails.receiverName}
+                </Text>
+              </View>
+            )}
 
             <View style={styles.requestRow}>
               <View style={styles.timeBox}>
@@ -345,7 +421,7 @@ export default function HomeScreen() {
   );
 }
 
-const createStyles = (colors: any) => StyleSheet.create({
+const createStyles = (colors: any, mapTheme: MapThemeTokens) => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.surfaceContainerLowest },
   header: {
     padding: spacing.marginMobile,
@@ -480,7 +556,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    backgroundColor: mapTheme.glassStrong,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,

@@ -21,7 +21,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const theme = {
     isDark,
-    colors: lightColors, // Forced to light colors
+    colors: isDark ? darkColors : lightColors,
     toggleTheme,
   };
 

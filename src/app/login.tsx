@@ -53,7 +53,7 @@ export default function LoginScreen() {
     if (!phoneValid) return;
     setErrorMsg('');
     setLoading(true);
-    
+
     // MOCK FLOW
     setTimeout(() => {
       setNotRegistered(false);
@@ -68,14 +68,14 @@ export default function LoginScreen() {
     if (otp.length < 4) return;
     setErrorMsg('');
     setLoading(true);
-    
+
     try {
       const response = await fetch('http://192.168.1.34:4000/api/auth/partner/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, otp })
       });
-      
+
       const data = await response.json();
       if (data.success) {
         await login(data.user, data.token);
@@ -97,12 +97,12 @@ export default function LoginScreen() {
     <View style={styles.container}>
       {/* Background Image Header */}
       <View style={styles.headerImageWrap}>
-        <Image 
-          source={require('../../assets/images/partner_bg.jpg')} 
+        <Image
+          source={require('../../assets/images/partner_bg.jpg')}
           style={styles.headerImage}
           resizeMode="cover"
         />
-        <LinearGradient 
+        <LinearGradient
           colors={['rgba(0,0,0,0.2)', 'rgba(0,0,0,0.6)']}
           locations={[0.3, 1]}
           style={StyleSheet.absoluteFill}
@@ -112,7 +112,7 @@ export default function LoginScreen() {
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={0}
         >
           <ScrollView
@@ -122,126 +122,126 @@ export default function LoginScreen() {
           >
             <View style={styles.content}>
               <View style={styles.titleWrap}>
-              <View style={styles.logoBadge}>
-                <MaterialIcon name="two-wheeler" size={32} color={colors.onPrimary} />
+                <View style={styles.logoBadge}>
+                  <MaterialIcon name="two-wheeler" size={32} color={colors.onPrimary} />
+                </View>
+                <Text style={styles.title}>Partner App</Text>
+                <Text style={styles.subtitle}>
+                  {step === 'phone'
+                    ? 'Sign in to start driving with Ematix'
+                    : `Enter the 4-digit code sent to +91 ${phone.replace(/\d(?=\d{4})/g, '*')}`}
+                </Text>
               </View>
-              <Text style={styles.title}>Partner App</Text>
-              <Text style={styles.subtitle}>
-                {step === 'phone'
-                  ? 'Sign in to start driving with Ematix'
-                  : `Enter the 4-digit code sent to +91 ${phone.replace(/\d(?=\d{4})/g, '*')}`}
-              </Text>
-            </View>
 
-            <View style={styles.formCard}>
-              {step === 'phone' ? (
-                <>
-                  <View style={styles.phoneRow}>
-                    <View style={styles.countryCode}>
-                      <Text style={styles.countryCodeText}>+91</Text>
+              <View style={styles.formCard}>
+                {step === 'phone' ? (
+                  <>
+                    <View style={styles.phoneRow}>
+                      <View style={styles.countryCode}>
+                        <Text style={styles.countryCodeText}>+91</Text>
+                      </View>
+                      <TextInput
+                        style={styles.phoneInput}
+                        placeholder="98765 43210"
+                        placeholderTextColor="rgba(255,255,255,0.5)"
+                        keyboardType="phone-pad"
+                        maxLength={10}
+                        value={phone}
+                        onChangeText={(t) => setPhone(t.replace(/\D/g, ''))}
+                      />
                     </View>
-                    <TextInput
-                      style={styles.phoneInput}
-                      placeholder="98765 43210"
-                      placeholderTextColor="rgba(255,255,255,0.5)"
-                      keyboardType="phone-pad"
-                      maxLength={10}
-                      value={phone}
-                      onChangeText={(t) => setPhone(t.replace(/\D/g, ''))}
-                    />
-                  </View>
 
-                  <TouchableOpacity
-                    style={[styles.primaryBtn, !phoneValid && styles.primaryBtnDisabled]}
-                    activeOpacity={0.85}
-                    disabled={!phoneValid}
-                    onPress={sendCode}
-                  >
-                    <Text style={styles.primaryBtnText}>Continue</Text>
-                    <MaterialIcon name="arrow-forward" size={18} color={colors.onPrimary} />
-                  </TouchableOpacity>
-
-                  <View style={styles.signupContainer}>
-                    <Text style={styles.signupText}>New to Ematix? </Text>
-                    <TouchableOpacity onPress={() => router.push({ pathname: '/signup', params: { phone } })}>
-                      <Text style={styles.signupLink}>Apply now</Text>
+                    <TouchableOpacity
+                      style={[styles.primaryBtn, !phoneValid && styles.primaryBtnDisabled]}
+                      activeOpacity={0.85}
+                      disabled={!phoneValid}
+                      onPress={sendCode}
+                    >
+                      <Text style={styles.primaryBtnText}>Continue</Text>
+                      <MaterialIcon name="arrow-forward" size={18} color={colors.onPrimary} />
                     </TouchableOpacity>
-                  </View>
-                </>
-              ) : (
-                <>
-                  <View style={styles.otpRow}>
-                    {[0, 1, 2, 3].map((i) => (
-                      <View key={i} style={[styles.otpBox, otp.length > i && styles.otpBoxFilled]}>
-                        <Text style={styles.otpDigit}>{otp[i] ?? ''}</Text>
-                      </View>
-                    ))}
-                    <TextInput
-                      style={styles.otpHidden}
-                      value={otp}
-                      onChangeText={(t) => { setNotRegistered(false); setOtp(t.replace(/\D/g, '').slice(0, 4)); }}
-                      keyboardType="number-pad"
-                      maxLength={4}
-                      autoFocus
-                      caretHidden
-                    />
-                  </View>
 
-                  {resendIn > 0 ? (
-                    <Text style={styles.resendText}>Resend code in 00:{String(resendIn).padStart(2, '0')}</Text>
-                  ) : (
-                    <TouchableOpacity onPress={sendCode} hitSlop={8}>
-                      <Text style={styles.resendActive}>Resend code</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  <TouchableOpacity
-                    style={[styles.primaryBtn, otp.length < 4 && styles.primaryBtnDisabled, { marginTop: spacing.stackLg }]}
-                    activeOpacity={0.85}
-                    disabled={otp.length < 4}
-                    onPress={verifyOtp}
-                  >
-                    <Text style={styles.primaryBtnText}>Verify & Go Online</Text>
-                    <MaterialIcon name="check" size={18} color={colors.onPrimary} />
-                  </TouchableOpacity>
-
-                  {notRegistered ? (
-                    <>
-                      <View style={styles.noAccCard}>
-                        <MaterialIcon name="person-off" size={24} color={colors.accentRed} />
-                        <View style={styles.noAccTextWrap}>
-                          <Text style={styles.noAccTitle}>Account not found</Text>
-                          <Text style={styles.noAccSub}>
-                            You don{'\u2019'}t have an account with +91 {phone}. Create a new one to continue.
-                          </Text>
-                        </View>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.noAccBtn}
-                        activeOpacity={0.85}
-                        onPress={() => router.push({ pathname: '/signup', params: { phone } })}
-                      >
-                        <Text style={styles.noAccBtnText}>Create a new account</Text>
-                        <MaterialIcon name="arrow-forward" size={16} color={colors.primary} />
+                    <View style={styles.signupContainer}>
+                      <Text style={styles.signupText}>New to Ematix? </Text>
+                      <TouchableOpacity onPress={() => router.push({ pathname: '/signup', params: { phone } })}>
+                        <Text style={styles.signupLink}>Apply now</Text>
                       </TouchableOpacity>
-                    </>
-                  ) : errorMsg ? (
-                    <Text style={styles.errorText}>{errorMsg}</Text>
-                  ) : null}
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.otpRow}>
+                      {[0, 1, 2, 3].map((i) => (
+                        <View key={i} style={[styles.otpBox, otp.length > i && styles.otpBoxFilled]}>
+                          <Text style={styles.otpDigit}>{otp[i] ?? ''}</Text>
+                        </View>
+                      ))}
+                      <TextInput
+                        style={styles.otpHidden}
+                        value={otp}
+                        onChangeText={(t) => { setNotRegistered(false); setOtp(t.replace(/\D/g, '').slice(0, 4)); }}
+                        keyboardType="number-pad"
+                        maxLength={4}
+                        autoFocus
+                        caretHidden
+                      />
+                    </View>
 
-                  <TouchableOpacity style={styles.backLink} onPress={() => { setNotRegistered(false); setStep('phone'); }} hitSlop={8}>
-                    <MaterialIcon name="arrow-back" size={16} color={colors.textMuted} />
-                    <Text style={styles.backLinkText}>Change number</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
+                    {resendIn > 0 ? (
+                      <Text style={styles.resendText}>Resend code in 00:{String(resendIn).padStart(2, '0')}</Text>
+                    ) : (
+                      <TouchableOpacity onPress={sendCode} hitSlop={8}>
+                        <Text style={styles.resendActive}>Resend code</Text>
+                      </TouchableOpacity>
+                    )}
 
-            <Text style={styles.termsText}>
-              By continuing you agree to the{' '}
-              <Text style={styles.termsLink}>Partner Agreement</Text> and{' '}
-              <Text style={styles.termsLink}>Privacy Policy</Text>.
-            </Text>
+                    <TouchableOpacity
+                      style={[styles.primaryBtn, otp.length < 4 && styles.primaryBtnDisabled, { marginTop: spacing.stackLg }]}
+                      activeOpacity={0.85}
+                      disabled={otp.length < 4}
+                      onPress={verifyOtp}
+                    >
+                      <Text style={styles.primaryBtnText}>Verify & Go Online</Text>
+                      <MaterialIcon name="check" size={18} color={colors.onPrimary} />
+                    </TouchableOpacity>
+
+                    {notRegistered ? (
+                      <>
+                        <View style={styles.noAccCard}>
+                          <MaterialIcon name="person-off" size={24} color={colors.accentRed} />
+                          <View style={styles.noAccTextWrap}>
+                            <Text style={styles.noAccTitle}>Account not found</Text>
+                            <Text style={styles.noAccSub}>
+                              You don{'\u2019'}t have an account with +91 {phone}. Create a new one to continue.
+                            </Text>
+                          </View>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.noAccBtn}
+                          activeOpacity={0.85}
+                          onPress={() => router.push({ pathname: '/signup', params: { phone } })}
+                        >
+                          <Text style={styles.noAccBtnText}>Create a new account</Text>
+                          <MaterialIcon name="arrow-forward" size={16} color={colors.primary} />
+                        </TouchableOpacity>
+                      </>
+                    ) : errorMsg ? (
+                      <Text style={styles.errorText}>{errorMsg}</Text>
+                    ) : null}
+
+                    <TouchableOpacity style={styles.backLink} onPress={() => { setNotRegistered(false); setStep('phone'); }} hitSlop={8}>
+                      <MaterialIcon name="arrow-back" size={16} color={colors.textMuted} />
+                      <Text style={styles.backLinkText}>Change number</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+
+              <Text style={styles.termsText}>
+                By continuing you agree to the{' '}
+                <Text style={styles.termsLink}>Partner Agreement</Text> and{' '}
+                <Text style={styles.termsLink}>Privacy Policy</Text>.
+              </Text>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>

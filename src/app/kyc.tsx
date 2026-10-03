@@ -37,7 +37,7 @@ export default function KYCScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
 
   const [documents, setDocuments] = useState<Record<string, string>>({});
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
@@ -96,7 +96,7 @@ export default function KYCScreen() {
 
   const handleSubmit = async () => {
     if (!isFormValid) return;
-    if (!user?.phone) {
+    if (!user?.phone || !token) {
       setErrorMsg('Session expired. Please login again.');
       return;
     }
@@ -105,9 +105,11 @@ export default function KYCScreen() {
     try {
       const response = await fetch('http://192.168.1.34:4000/api/auth/partner/kyc', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
-          phone: user.phone,
           documents: {
             aadhaarNumber,
             panNumber,
