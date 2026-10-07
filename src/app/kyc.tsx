@@ -1,5 +1,5 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -19,9 +19,15 @@ import { useTheme } from '../theme/ThemeProvider';
 import { fonts, type, spacing, radius } from '../theme/typography';
 import MaterialIcon from '../components/MaterialIcon';
 import { useAuth } from '../context/AuthContext';
+import { authedFetch } from '../utils/api';
 import { uploadDocument } from '../utils/upload';
 
-const REQUIRED_DOCS = [
+/**
+ * Fallback list used only until GET /api/kyc/required resolves. The server owns
+ * the canonical list in models/documentFields.js -- this previously drifted and
+ * was the reason a renamed key silently stopped being saved.
+ */
+const FALLBACK_DOCS: { key: string; label: string; hint: string }[] = [
   { key: 'aadhaarFront', label: 'Aadhaar Card - Front', hint: 'Clear photo, all 4 corners visible' },
   { key: 'aadhaarBack', label: 'Aadhaar Card - Back', hint: 'QR code must be clearly visible' },
   { key: 'panCard', label: 'PAN Card', hint: 'Clear photo of the card' },
@@ -33,13 +39,52 @@ const REQUIRED_DOCS = [
   { key: 'vehiclePhoto', label: 'Vehicle Photo', hint: 'Front 3/4 view with visible number plate' },
 ];
 
+/** Per-document state as the server reports it. */
+type ServerDocState = {
+  uploaded: boolean;
+  /** The file exists on the server, not just as a row. */
+  onDisk: boolean;
+  status: 'none' | 'uploaded' | 'under_review' | 'approved' | 'rejected';
+  rejectionReason: string;
+};
+
+const EMPTY_DOC_STATE: ServerDocState = {
+  uploaded: false,
+  onDisk: false,
+  status: 'none',
+  rejectionReason: '',
+};
+
+const STATUS_TEXT: Record<ServerDocState['status'], string> = {
+  none: '',
+  uploaded: 'Uploaded — not submitted yet',
+  under_review: 'Under review',
+  approved: 'Approved',
+  rejected: 'Rejected',
+};
+
 export default function KYCScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
-  const { user, token } = useAuth();
+  const { user, token, refresh } = useAuth();
 
-  const [documents, setDocuments] = useState<Record<string, string>>({});
+  // Server-driven document list; FALLBACK_DOCS is only used before it resolves.
+  const [requiredDocs, setRequiredDocs] = useState(FALLBACK_DOCS);
+  /**
+   * docKey -> the server's own view of that document.
+   *
+   * This is what the progress bar, the Submit gate and the per-row status are
+   * derived from. The screen previously keyed completion off local image URIs,
+   * which meant a partner who uploaded on another device, or before reinstalling
+   * the app, saw an empty form with Submit permanently disabled even though the
+   * server already had all nine documents.
+   */
+  const [docState, setDocState] = useState<Record<string, ServerDocState>>({});
+  // docKey -> local image URI, purely so a freshly picked photo shows a preview.
+  // Never used to decide whether a document is on file.
+  const [localUris, setLocalUris] = useState<Record<string, string>>({});
+  const [kycStatus, setKycStatus] = useState<string | null>(null);
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const [aadhaarNumber, setAadhaarNumber] = useState('');
   const [panNumber, setPanNumber] = useState('');
@@ -54,12 +99,35 @@ export default function KYCScreen() {
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [hydrating, setHydrating] = useState(true);
 
-  const allDocsUploaded = REQUIRED_DOCS.every((d) => !!documents[d.key]);
+  /**
+   * A document counts as on file only when the server has both the row and the
+   * bytes. `onDisk` is what stops this screen claiming a step is done when a
+   * file was lost or cleaned up out of band.
+   */
+  const isOnFile = useCallback(
+    (key: string) => docState[key]?.onDisk === true,
+    [docState]
+  );
+
+  const uploadedCount = requiredDocs.filter((d) => isOnFile(d.key)).length;
+  const allDocsUploaded = requiredDocs.length > 0 && uploadedCount === requiredDocs.length;
+
+  const rejectedCount = requiredDocs.filter((d) => docState[d.key]?.status === 'rejected').length;
+
+  /**
+   * Approval is terminal server-side: /api/kyc/submit and /api/upload both
+   * refuse with 409. Mirroring that here avoids offering a submit button that
+   * can only fail.
+   */
+  const isApproved = kycStatus === 'approved';
+
   const bankFilled =
     (ifsc.trim().length >= 6 && acctNo.replace(/\D/g, '').length >= 6) ||
     upiId.includes('@');
   const isFormValid =
+    !isApproved &&
     allDocsUploaded &&
     aadhaarNumber.replace(/\D/g, '').length === 12 &&
     panNumber.trim().length === 10 &&
@@ -69,7 +137,89 @@ export default function KYCScreen() {
     ecPhone.replace(/\D/g, '').length === 10 &&
     consent;
 
+  /**
+   * Re-reads the server's document state.
+   *
+   * Called after hydration and again after every upload, rather than patching
+   * local state optimistically. The upload response only describes the one
+   * document it wrote; it says nothing about the other eight, and it cannot
+   * report whether a rejection was cleared. Re-fetching is one small request and
+   * it keeps the screen honest about what the server actually holds.
+   */
+  const loadServerDocs = useCallback(async () => {
+    const mine = await authedFetch('/api/kyc/me', token);
+    const next: Record<string, ServerDocState> = {};
+    for (const doc of mine?.documents || []) {
+      next[doc.docKey] = {
+        uploaded: doc.uploaded === true,
+        onDisk: doc.onDisk === true,
+        status: doc.status || 'none',
+        rejectionReason: doc.rejectionReason || '',
+      };
+    }
+    setDocState(next);
+    setKycStatus(mine?.kycStatus || null);
+    return mine;
+  }, [token]);
+
+  // Hydrate from the server on mount. Without this the form always started
+  // blank, so a partner returning to finish a partial KYC could not tell which
+  // documents were already stored.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const [required, mine] = await Promise.all([
+          authedFetch('/api/kyc/required', token),
+          authedFetch('/api/kyc/me', token),
+        ]);
+        if (cancelled) return;
+
+        if (Array.isArray(required?.documents) && required.documents.length) {
+          setRequiredDocs(required.documents);
+        }
+
+        const next: Record<string, ServerDocState> = {};
+        for (const doc of mine?.documents || []) {
+          next[doc.docKey] = {
+            uploaded: doc.uploaded === true,
+            onDisk: doc.onDisk === true,
+            status: doc.status || 'none',
+            rejectionReason: doc.rejectionReason || '',
+          };
+        }
+        setDocState(next);
+        setKycStatus(mine?.kycStatus || null);
+
+        setAadhaarNumber(mine?.aadhaarNumber || '');
+        setPanNumber(mine?.panNumber || '');
+        setAcctName(mine?.bankDetails?.accountName || '');
+        setIfsc(mine?.bankDetails?.ifsc || '');
+        setAcctNo(mine?.bankDetails?.accountNumber || '');
+        setUpUpiId(mine?.bankDetails?.upiId || '');
+        setEcName(mine?.emergencyContact?.name || '');
+        setEcPhone(mine?.emergencyContact?.phone || '');
+        setWorkType(mine?.availability?.workType || 'Full-time');
+        setHours(mine?.availability?.hours || '');
+        setConsent(mine?.backgroundCheckConsent === true);
+      } catch {
+        // Fall back to the bundled list; the form stays usable offline.
+      } finally {
+        if (!cancelled) setHydrating(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   const pickAndUpload = useCallback(async (key: string) => {
+    if (!token) {
+      Alert.alert('Session expired', 'Please login again.');
+      return;
+    }
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
       Alert.alert('Permission required', 'Photo library access is needed to upload documents.');
@@ -84,15 +234,22 @@ export default function KYCScreen() {
     if (result.canceled || !result.assets?.length) return;
     const uri = result.assets[0].uri;
     setUploadingKey(key);
-    const url = await uploadDocument(uri);
+    const record = await uploadDocument(uri, key, token);
     setUploadingKey(null);
-    if (url) {
-      setDocuments((prev) => ({ ...prev, [key]: url, [`${key}_local`]: uri }));
+    if (record) {
+      // Preview only. The row's real status comes from the refresh below.
+      setLocalUris((prev) => ({ ...prev, [key]: uri }));
+      try {
+        await loadServerDocs();
+      } catch {
+        // The upload landed; a failed refresh just leaves the previous state on
+        // screen, which self-corrects on the next visit.
+      }
       Alert.alert('Uploaded', 'Document uploaded successfully.');
     } else {
       Alert.alert('Upload failed', 'Could not upload the document. Please try again.');
     }
-  }, []);
+  }, [token, loadServerDocs]);
 
   const handleSubmit = async () => {
     if (!isFormValid) return;
@@ -103,44 +260,38 @@ export default function KYCScreen() {
     setLoading(true);
     setErrorMsg('');
     try {
-      const response = await fetch('http://192.168.1.34:4000/api/auth/partner/kyc', {
+      // Document files are already stored and recorded against this partner by
+      // the upload endpoint. Submitting only sends the non-file fields; the
+      // server re-checks that every required docKey has a stored record.
+      const data = await authedFetch('/api/kyc/submit', token, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          documents: {
-            aadhaarNumber,
-            panNumber,
-            aadhaarFront: documents.aadhaarFront,
-            aadhaarBack: documents.aadhaarBack,
-            panCard: documents.panCard,
-            licenseFront: documents.licenseFront,
-            licenseBack: documents.licenseBack,
-            rcBook: documents.rcBook,
-            insurance: documents.insurance,
-            puc: documents.puc,
-            vehiclePhoto: documents.vehiclePhoto,
-          },
+        body: {
+          aadhaarNumber,
+          panNumber,
           bankDetails: {
             accountName: acctName,
             ifsc,
             accountNumber: acctNo,
             upiId,
-            cancelledCheque: documents.cancelledCheque || '',
           },
           emergencyContact: { name: ecName, phone: ecPhone },
           availability: { workType, hours: hours || 'Flexible' },
           backgroundCheckConsent: consent,
-        }),
+        },
       });
-      const data = await response.json();
-      if (data.success) {
-        router.replace('/pending-approval');
-      } else {
-        setErrorMsg(data.error || 'KYC submission failed');
+
+      // Refresh so AuthContext carries the new kycStatus. Without this the app
+      // kept the stale pre-KYC user and Documents showed nothing uploaded.
+      await refresh();
+      try {
+        // Pull the post-submit document state too, so returning to this screen
+        // shows `under_review` rather than the pre-submit statuses.
+        await loadServerDocs();
+      } catch {
+        // The submit succeeded; a failed refresh does not change that.
       }
+      router.replace('/pending-approval');
+      return data;
     } catch (e: any) {
       setErrorMsg(e.message || 'Network error');
     } finally {
@@ -173,23 +324,43 @@ export default function KYCScreen() {
   ), [styles, colors]);
 
   const DocRow = useCallback(({ item, optional }: { item: { key: string; label: string; hint: string }; optional?: boolean }) => {
-    const uploaded = !!documents[item.key];
-    const localUri = documents[`${item.key}_local`];
+    const state = docState[item.key] || EMPTY_DOC_STATE;
+    const onFile = state.onDisk;
+    const localUri = localUris[item.key];
     const uploading = uploadingKey === item.key;
+    const rejected = state.status === 'rejected';
+    // Approved documents are final. Letting the partner re-pick one would upload
+    // bytes the server then refuses with a 409.
+    const locked = isApproved || state.status === 'approved';
+
+    const statusText = uploading
+      ? 'Uploading...'
+      : rejected
+        ? state.rejectionReason || 'Rejected — please upload again'
+        : onFile
+          ? STATUS_TEXT[state.status]
+          : state.uploaded
+            ? 'Missing on server — please upload again'
+            : item.hint;
+
     return (
-      <View style={styles.docRow}>
+      <View style={[styles.docRow, rejected && styles.docRowRejected]}>
         <TouchableOpacity
-          style={[styles.docThumb, !uploaded && styles.docThumbEmpty]}
+          style={[styles.docThumb, !onFile && styles.docThumbEmpty]}
           onPress={() => pickAndUpload(item.key)}
           activeOpacity={0.8}
-          disabled={uploading}
+          disabled={uploading || locked}
         >
-          {uploaded && localUri ? (
+          {localUri && !locked ? (
             <Image source={{ uri: localUri }} style={styles.docThumbImage} />
           ) : uploading ? (
             <ActivityIndicator size="small" color={colors.primary} />
           ) : (
-            <MaterialIcon name="add-a-photo" size={22} color={colors.textMuted} />
+            <MaterialIcon
+              name={onFile ? 'description' : 'add-a-photo'}
+              size={22}
+              color={locked ? colors.primary : colors.textMuted}
+            />
           )}
         </TouchableOpacity>
         <View style={styles.docInfo}>
@@ -197,12 +368,15 @@ export default function KYCScreen() {
             {item.label}
             {optional && <Text style={styles.docOptional}>  (optional)</Text>}
           </Text>
-          <Text style={styles.docHint}>{uploading ? 'Uploading...' : uploaded ? 'Uploaded' : item.hint}</Text>
+          <Text style={[styles.docHint, rejected && styles.docHintRejected]}>{statusText}</Text>
         </View>
-        {uploaded && <MaterialIcon name="check-circle" size={22} color={colors.primary} />}
+        {state.status === 'approved' && <MaterialIcon name="verified" size={22} color={colors.primary} />}
+        {onFile && state.status !== 'approved' && (
+          <MaterialIcon name={rejected ? 'cancel' : 'check-circle'} size={22} color={rejected ? colors.error : colors.primary} />
+        )}
       </View>
     );
-  }, [styles, colors, documents, uploadingKey, pickAndUpload]);
+  }, [styles, colors, docState, localUris, uploadingKey, pickAndUpload, isApproved]);
 
   const SectionHeader = useCallback(({ icon, title, subtitle }: { icon: string; title: string; subtitle: string }) => (
     <View style={styles.sectionHeader}>
@@ -239,15 +413,47 @@ export default function KYCScreen() {
             </Text>
           </View>
 
+          {isApproved ? (
+            <View style={[styles.statusBanner, styles.statusBannerOk]}>
+              <MaterialIcon name="verified" size={18} color="#047857" />
+              <Text style={styles.statusBannerText}>
+                Your KYC is verified. These documents are locked and cannot be changed.
+              </Text>
+            </View>
+          ) : rejectedCount > 0 ? (
+            <View style={[styles.statusBanner, styles.statusBannerBad]}>
+              <MaterialIcon name="error-outline" size={18} color="#B91C1C" />
+              <Text style={styles.statusBannerText}>
+                {rejectedCount} document{rejectedCount === 1 ? '' : 's'} need
+                {rejectedCount === 1 ? 's' : ''} attention. Fix the reason shown below and submit
+                again.
+              </Text>
+            </View>
+          ) : kycStatus === 'under_review' ? (
+            <View style={[styles.statusBanner, styles.statusBannerInfo]}>
+              <MaterialIcon name="schedule" size={18} color={colors.primary} />
+              <Text style={styles.statusBannerText}>
+                Your documents are with our verification team. You can still replace anything they
+                flag.
+              </Text>
+            </View>
+          ) : null}
+
           <View style={styles.progressRow}>
             <Text style={styles.progressText}>
-              {REQUIRED_DOCS.filter((d) => !!documents[d.key]).length}/{REQUIRED_DOCS.length} documents uploaded
+              {hydrating
+                ? 'Checking your uploads...'
+                : `${uploadedCount}/${requiredDocs.length} documents uploaded`}
             </Text>
             <View style={styles.progressTrack}>
               <View
                 style={[
                   styles.progressFill,
-                  { width: `${(REQUIRED_DOCS.filter((d) => !!documents[d.key]).length / REQUIRED_DOCS.length) * 100}%` },
+                  {
+                    width: hydrating
+                      ? '0%'
+                      : `${(uploadedCount / Math.max(requiredDocs.length, 1)) * 100}%`,
+                  },
                 ]}
               />
             </View>
@@ -256,17 +462,17 @@ export default function KYCScreen() {
           <SectionHeader icon="badge" title="Personal & Identity" subtitle="Your ID details and documents" />
           <Field label="Aadhaar Number" value={aadhaarNumber} onChange={(t) => setAadhaarNumber(t.replace(/\D/g, '').slice(0, 12))} placeholder="XXXX XXXX XXXX" keyboard="number-pad" />
           <Field label="PAN Number" value={panNumber} onChange={(t) => setPanNumber(t.toUpperCase().slice(0, 10))} placeholder="ABCDE1234F" autoCap="characters" maxLength={10} />
-          {REQUIRED_DOCS.slice(0, 3).map((d) => (
+          {requiredDocs.slice(0, 3).map((d) => (
             <DocRow key={d.key} item={d} />
           ))}
 
           <SectionHeader icon="credit-card" title="Driving License" subtitle="Front and back photos" />
-          {REQUIRED_DOCS.slice(3, 5).map((d) => (
+          {requiredDocs.slice(3, 5).map((d) => (
             <DocRow key={d.key} item={d} />
           ))}
 
           <SectionHeader icon="description" title="Vehicle Documents" subtitle="RC, insurance, PUC and photo" />
-          {REQUIRED_DOCS.slice(5).map((d) => (
+          {requiredDocs.slice(5).map((d) => (
             <DocRow key={d.key} item={d} />
           ))}
 
@@ -275,7 +481,10 @@ export default function KYCScreen() {
           <Field label="IFSC Code" value={ifsc} onChange={(t) => setIfsc(t.toUpperCase())} placeholder="e.g. HDFC0001234" autoCap="characters" />
           <Field label="Account Number" value={acctNo} onChange={(t) => setAcctNo(t.replace(/\D/g, ''))} placeholder="Your bank account number" keyboard="number-pad" />
           <Field label="UPI ID (alternative)" value={upiId} onChange={setUpUpiId} placeholder="yourname@upi" />
-          <DocRow item={{ key: 'cancelledCheque', label: 'Cancelled Cheque', hint: 'Optional - helps verify bank details' }} optional />
+          {/* Cancelled cheque was an optional DocRow keyed on 'cancelledCheque',
+              which is not a member of DOCUMENT_FIELDS and would have been
+              rejected by the upload route's docKey validation. Removed until
+              the server grows a proper optional-document key for it. */}
 
           <SectionHeader icon="emergency" title="Emergency Contact" subtitle="Someone we can reach if needed" />
           <Field label="Contact Name" value={ecName} onChange={setEcName} placeholder="e.g. Sita Sharma" />
@@ -319,9 +528,16 @@ export default function KYCScreen() {
           >
             {loading ? (
               <ActivityIndicator size="small" color={colors.onPrimary} />
+            ) : isApproved ? (
+              <>
+                <Text style={styles.primaryBtnText}>KYC Verified</Text>
+                <MaterialIcon name="verified" size={18} color={colors.onPrimary} />
+              </>
             ) : (
               <>
-                <Text style={styles.primaryBtnText}>Submit for Verification</Text>
+                <Text style={styles.primaryBtnText}>
+                  {rejectedCount > 0 ? 'Resubmit for Verification' : 'Submit for Verification'}
+                </Text>
                 <MaterialIcon name="check" size={18} color={colors.onPrimary} />
               </>
             )}
@@ -371,6 +587,29 @@ const createStyles = (colors: any) => StyleSheet.create({
     alignItems: 'flex-start',
   },
   alertText: {
+    ...type.bodySm,
+    color: colors.onSurface,
+    flex: 1,
+    lineHeight: 18,
+  },
+  statusBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.stackSm,
+    padding: spacing.stackMd,
+    borderRadius: radius.lg,
+    marginBottom: spacing.stackLg,
+  },
+  statusBannerOk: {
+    backgroundColor: '#ECFDF5',
+  },
+  statusBannerBad: {
+    backgroundColor: '#FEE2E2',
+  },
+  statusBannerInfo: {
+    backgroundColor: colors.lightBlueTint,
+  },
+  statusBannerText: {
     ...type.bodySm,
     color: colors.onSurface,
     flex: 1,
@@ -461,6 +700,13 @@ const createStyles = (colors: any) => StyleSheet.create({
     borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: colors.surfaceContainerHigh,
+  },
+  docRowRejected: {
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
+  docHintRejected: {
+    color: colors.error,
   },
   docThumbImage: {
     width: 56,

@@ -20,7 +20,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../theme/ThemeProvider';
 import { buildMapTheme, type MapThemeTokens } from '../theme/mapTheme';
 import { fonts, type, spacing, radius } from '../theme/typography';
-import RealMap from '../components/RealMap';
+import LiveMap, { type LivePin, type LiveRoute, type LiveVehicle } from '../components/LiveMap';
 import MaterialIcon from '../components/MaterialIcon';
 import SwipeButton from '../components/SwipeButton';
 import { socketService } from '../utils/socket';
@@ -59,6 +59,13 @@ type RideData = {
   messages?: any[];
 };
 
+const getVehicleKind = (v: string | undefined): any => {
+  if (!v) return 'bike';
+  const lower = v.toLowerCase();
+  if (lower === 'car' || lower.includes('car') || lower.includes('premium') || lower.includes('taxi') || lower.includes('sedan')) return 'car';
+  if (lower === 'auto' || lower.includes('auto')) return 'auto';
+  return 'bike';
+};
 
 export default function ActiveRideScreen() {
   const { colors, isDark } = useTheme();
@@ -356,6 +363,35 @@ export default function ActiveRideScreen() {
     };
   }, [rideId]);
 
+  const openNavigation = () => {
+    let destination;
+    if (rideState === 'EN_ROUTE_PICKUP') {
+      destination = pickupCoords;
+    } else {
+      destination = dropoffCoords;
+    }
+
+    if (!partnerLocation || !destination) {
+      console.warn('Location data not available for navigation');
+      return;
+    }
+
+    const startLat = partnerLocation.latitude;
+    const startLng = partnerLocation.longitude;
+    const destLat = destination.latitude;
+    const destLng = destination.longitude;
+
+    const url = Platform.select({
+      ios: `http://maps.apple.com/?saddr=${startLat},${startLng}&daddr=${destLat},${destLng}&dirflg=d`,
+      android: `google.navigation:q=${destLat},${destLng}`,
+      default: `https://www.google.com/maps/dir/?api=1&origin=${startLat},${startLng}&destination=${destLat},${destLng}&travelmode=driving`,
+    });
+
+    if (url) {
+      Linking.openURL(url).catch((err) => console.error('An error occurred', err));
+    }
+  };
+
   const callPassenger = () => {
     const href = telLink(ride?.customer?.phone);
     if (href) {
@@ -524,23 +560,27 @@ export default function ActiveRideScreen() {
 
       {/* Map Section */}
       <View style={styles.mapContainer}>
-        <RealMap
+        <LiveMap
           interactive={true}
           style={styles.mapImage}
-          region={
+          center={
             pickupCoords
-              ? { latitude: pickupCoords.latitude, longitude: pickupCoords.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }
+              ? [pickupCoords.longitude, pickupCoords.latitude]
               : partnerLocation
-                ? { latitude: partnerLocation.latitude, longitude: partnerLocation.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }
+                ? [partnerLocation.longitude, partnerLocation.latitude]
                 : undefined
           }
-          markers={[
-            ...(pickupCoords && rideState !== 'EN_ROUTE_DROPOFF' ? [{ id: 'pickup', latitude: pickupCoords.latitude, longitude: pickupCoords.longitude, color: mapTheme.routeDone }] : []),
-            ...(dropoffCoords ? [{ id: 'dropoff', latitude: dropoffCoords.latitude, longitude: dropoffCoords.longitude, color: mapTheme.success }] : []),
-            ...(partnerLocation ? [{ id: 'partner', latitude: partnerLocation.latitude, longitude: partnerLocation.longitude, color: mapTheme.onBase }] : [])
+          zoom={14}
+          pins={[
+            ...(pickupCoords && rideState !== 'EN_ROUTE_DROPOFF' ? [{ id: 'pickup', lngLat: [pickupCoords.longitude, pickupCoords.latitude] as [number, number], color: mapTheme.routeDone }] : []),
+            ...(dropoffCoords ? [{ id: 'dropoff', lngLat: [dropoffCoords.longitude, dropoffCoords.latitude] as [number, number], color: mapTheme.success, variant: 'end' as const }] : [])
           ]}
-          routeCoordinates={routeCoords}
-          mapPadding={{ top: 80, bottom: 420, left: 40, right: 40 }}
+          vehicle={
+            partnerLocation ? { lngLat: [partnerLocation.longitude, partnerLocation.latitude], kind: getVehicleKind(ride?.vehicleType) } : null
+          }
+          route={routeCoords.length > 0 ? { coordinates: routeCoords } : null}
+          edgePadding={80}
+          fitOnRouteChange={false}
         />
 
         {/* Floating Map Controls */}
@@ -586,7 +626,7 @@ export default function ActiveRideScreen() {
                 : (ride?.pickup?.address || 'Pickup location')}
             </Text>
           </View>
-          <TouchableOpacity style={styles.navBtn}>
+          <TouchableOpacity style={styles.navBtn} onPress={openNavigation}>
             <MaterialIcon name="navigation" size={20} color={colors.onPrimary} />
           </TouchableOpacity>
         </View>

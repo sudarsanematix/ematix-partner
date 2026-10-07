@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "ematix-partner",
-    "slug": "ematix-partner",
+    "name": "Ematix Go Partners",
+    "slug": "ematix-go-partners",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -19,6 +19,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
+      "package": "com.sudarsanematix.ematixgopartners",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -45,6 +46,14 @@
           "image": "./assets/images/splash-icon.png",
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Ematix Partner needs access to your photos so you can attach your KYC documents and delivery proof photos.",
+          "cameraPermission": "Ematix Partner needs the camera so you can photograph delivery proof at pickup and drop-off.",
+          "microphonePermission": false
         }
       ]
     ],

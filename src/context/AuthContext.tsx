@@ -1,6 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { socketService } from '../utils/socket';
+import { authedFetch } from '../utils/api';
+
+/** Which document slots have a file on the partner record. Booleans only. */
+export type PartnerDocuments = Record<string, boolean>;
 
 type User = {
   id: string;
@@ -17,6 +21,14 @@ type User = {
   licenseNumber?: string;
   licenseExpiry?: string;
   kycStatus?: string;
+  rating?: number;
+  ratingCount?: number;
+  documents?: PartnerDocuments;
+  preferences?: {
+    language: string;
+    avoidTolls: boolean;
+    autoNavigate: boolean;
+  };
 };
 
 type AuthContextType = {
@@ -27,6 +39,9 @@ type AuthContextType = {
   setIsOnline: (online: boolean) => Promise<void>;
   login: (userData: User, authToken: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Fetches the authoritative partner record (KYC status, documents, rating). */
+  refresh: () => Promise<void>;
+  isRefreshing: boolean;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -36,21 +51,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isOnline, setIsOnlineState] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Reads the current token from state so it never uses a stale closure.
+  const refresh = React.useCallback(async () => {
+    if (!token) return;
+
+    setIsRefreshing(true);
+    try {
+      const data = await authedFetch('/api/profile/partner/me', token);
+      if (data?.user) {
+        setUser(data.user);
+        await AsyncStorage.setItem('@ematix_partner_user', JSON.stringify(data.user));
+      }
+    } catch (e) {
+      console.warn('Failed to refresh partner profile', e);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [token]);
 
   useEffect(() => {
     (async () => {
       try {
-        const [storedToken, storedUser, storedOnline] = await Promise.all([
+        const [storedToken, storedUser] = await Promise.all([
           AsyncStorage.getItem('@ematix_partner_token'),
           AsyncStorage.getItem('@ematix_partner_user'),
-          AsyncStorage.getItem('@ematix_partner_online'),
         ]);
         if (storedToken && storedUser) {
           setToken(storedToken);
           setUser(JSON.parse(storedUser));
-          if (storedOnline === 'true') {
-            setIsOnlineState(true);
-          }
           // The socket handshake requires this token, so it must be handed
           // over before any ride screen mounts.
           socketService.setToken(storedToken);
@@ -65,7 +95,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const setIsOnline = async (online: boolean) => {
     setIsOnlineState(online);
-    await AsyncStorage.setItem('@ematix_partner_online', String(online));
   };
 
   const login = async (userData: User, authToken: string) => {
@@ -74,7 +103,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsOnlineState(false);
     await AsyncStorage.setItem('@ematix_partner_token', authToken);
     await AsyncStorage.setItem('@ematix_partner_user', JSON.stringify(userData));
-    await AsyncStorage.setItem('@ematix_partner_online', 'false');
     socketService.setToken(authToken);
   };
 
@@ -85,14 +113,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await Promise.all([
       AsyncStorage.removeItem('@ematix_partner_token'),
       AsyncStorage.removeItem('@ematix_partner_user'),
-      AsyncStorage.removeItem('@ematix_partner_online'),
     ]);
     socketService.disconnect();
     socketService.setToken(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, isOnline, setIsOnline, login, logout }}>
+    <AuthContext.Provider
+      value={{ user, token, loading, isOnline, setIsOnline, login, logout, refresh, isRefreshing }}
+    >
       {children}
     </AuthContext.Provider>
   );

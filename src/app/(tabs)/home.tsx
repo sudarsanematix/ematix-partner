@@ -204,6 +204,22 @@ export default function HomeScreen() {
     socketService.emit('accept_ride', { rideId: currentRequest.id, partnerId: user?.id });
   };
 
+  const kycStatus = user?.kycStatus || 'pending';
+  const uploadedCount = Object.values(user?.documents || {}).filter(Boolean).length;
+  // A rough estimate of total documents based on the fallback list in kyc.tsx
+  const totalDocs = 9; 
+  
+  let kycTitle = 'Complete your KYC';
+  let kycSub = `${uploadedCount} of ${totalDocs} steps done · unlock your first payout`;
+  
+  if (kycStatus === 'under_review') {
+    kycTitle = 'KYC Under Review';
+    kycSub = 'We are verifying your documents';
+  } else if (kycStatus === 'rejected') {
+    kycTitle = 'KYC Rejected';
+    kycSub = 'Some documents need your attention';
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
@@ -284,14 +300,6 @@ export default function HomeScreen() {
                 markers={[
                   ...(myLocation
                     ? [{ id: 'me', latitude: myLocation.latitude, longitude: myLocation.longitude, color: mapTheme.onBase }]
-                    : []),
-                  ...(isOnline && highDemandZones
-                    ? highDemandZones.map((zone, i) => ({
-                      id: `hotspot-${i}`,
-                      latitude: zone.latitude,
-                      longitude: zone.longitude,
-                      color: '#FACC15',
-                    }))
                     : [])
                 ]}
               />
@@ -303,26 +311,18 @@ export default function HomeScreen() {
             >
               <MaterialIcon name="my-location" size={24} color={colors.primary} />
             </TouchableOpacity>
-
-            {/* Dynamic Hotspot Overlay */}
-            {isOnline && highDemandZones && highDemandZones.length > 0 && (
-              <View style={styles.hotspotPill}>
-                <View style={styles.hotspotDot} />
-                <Text style={styles.hotspotText}>High demand in {highDemandZones[0].area}</Text>
-              </View>
-            )}
           </View>
         </View>
 
         {/* Verification banner */}
-        {user?.kycStatus !== 'approved' && user?.kycStatus !== 'completed' && (
-          <TouchableOpacity style={styles.kycBanner} activeOpacity={0.85} onPress={() => router.push('/kyc')}>
+        {kycStatus !== 'approved' && kycStatus !== 'completed' && (
+          <TouchableOpacity style={[styles.kycBanner, kycStatus === 'rejected' && { backgroundColor: colors.error }]} activeOpacity={0.85} onPress={() => router.push('/kyc')}>
             <View style={styles.kycBannerIcon}>
-              <MaterialIcon name="verified-user" size={22} color={colors.onPrimary} />
+              <MaterialIcon name={kycStatus === 'rejected' ? 'error-outline' : kycStatus === 'under_review' ? 'schedule' : 'verified-user'} size={22} color={colors.onPrimary} />
             </View>
             <View style={styles.kycBannerText}>
-              <Text style={styles.kycBannerTitle}>Complete your KYC</Text>
-              <Text style={styles.kycBannerSub}>2 of 5 steps done · unlock your first payout</Text>
+              <Text style={styles.kycBannerTitle}>{kycTitle}</Text>
+              <Text style={styles.kycBannerSub}>{kycSub}</Text>
             </View>
             <MaterialIcon name="chevron-right" size={20} color={colors.onPrimaryContainer} />
           </TouchableOpacity>

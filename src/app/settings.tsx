@@ -1,5 +1,5 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch } from 'react-native';
 import { useRouter } from 'expo-router';
 import SharedHeader from '../components/SharedHeader';
@@ -7,6 +7,7 @@ import MaterialIcon, { MaterialIconName } from '../components/MaterialIcon';
 import { useTheme } from '../theme/ThemeProvider';
 import { fonts, type, spacing, radius } from '../theme/typography';
 import { useAuth } from '../context/AuthContext';
+import { authedFetch } from '../utils/api';
 
 function Row({
   icon,
@@ -65,17 +66,68 @@ function Row({
   );
 }
 
+const VEHICLE_LABELS: Record<string, string> = {
+  bike: 'Two-wheeler',
+  auto: 'Auto',
+  mini_truck: 'Mini Truck',
+  car: 'Economic Car',
+  premium_car: 'Premium Taxi',
+};
+
 export default function SettingsScreen() {
   const router = useRouter();
-  const { logout } = useAuth();
+  const { logout, user, token, login, refresh } = useAuth();
+  const vehicleLabel = VEHICLE_LABELS[user?.vehicleType || ''] || 'Vehicle';
   const { colors } = useTheme();
   const styles = createStyles(colors);
 
+  // Server-owned navigation preferences. Local state keeps the switches
+  // responsive; the persisted copy wins on refresh.
   const [navPrefs, setNavPrefs] = useState({
-    avoidTolls: true,
-    autoNavigate: false,
-    language: 'English',
+    avoidTolls: user?.preferences?.avoidTolls ?? true,
+    autoNavigate: user?.preferences?.autoNavigate ?? false,
+    language: user?.preferences?.language ?? 'English',
   });
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // Adopt a new server copy during render (React's "adjust state when a prop
+  // changes" pattern) instead of in an effect, avoiding a cascading render.
+  const [syncedPreferences, setSyncedPreferences] = useState(user?.preferences);
+  if (user?.preferences !== syncedPreferences) {
+    setSyncedPreferences(user?.preferences);
+    const p = user?.preferences;
+    if (p) {
+      setNavPrefs({
+        avoidTolls: p.avoidTolls,
+        autoNavigate: p.autoNavigate,
+        language: p.language,
+      });
+    }
+  }
+
+  const persistPrefs = async (patch: Record<string, unknown>) => {
+    if (!token) return;
+    try {
+      const data = await authedFetch('/api/profile/partner/preferences', token, {
+        method: 'PUT',
+        body: patch,
+      });
+      if (data?.user) await login(data.user, token);
+    } catch {
+      refresh();
+    }
+  };
+
+  const setPref = (key: 'avoidTolls' | 'autoNavigate' | 'language', value: boolean | string) => {
+    setNavPrefs((s) => {
+      const next = { ...s, [key]: value };
+      persistPrefs({ [key]: value });
+      return next;
+    });
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -90,8 +142,10 @@ export default function SettingsScreen() {
               <MaterialIcon name="directions-car" size={22} color={colors.onPrimary} />
             </View>
             <View style={styles.vehicleInfo}>
-              <Text style={styles.vehicleName}>Bajaj RE Compact</Text>
-              <Text style={styles.vehicleReg}>TN 01 AB 1234</Text>
+              <Text style={styles.vehicleName}>
+                {user?.vehicleModel || vehicleLabel}
+              </Text>
+              <Text style={styles.vehicleReg}>{user?.vehicleNumber || 'No number added'}</Text>
             </View>
             <View style={styles.vehicleBadge}>
               <MaterialIcon name="check-circle" size={14} color={colors.primary} />
@@ -116,8 +170,8 @@ export default function SettingsScreen() {
         {/* Navigation */}
         <Text style={styles.groupTitle}>Navigation</Text>
         <View style={styles.group}>
-          <Row icon="toll" label="Avoid toll roads" sublabel="Prefer toll-free routes on trips" value={navPrefs.avoidTolls} onValueChange={(v) => setNavPrefs((s) => ({ ...s, avoidTolls: v }))} />
-          <Row icon="navigation" label="Auto-start navigation" sublabel="Launch maps as soon as a trip is accepted" value={navPrefs.autoNavigate} onValueChange={(v) => setNavPrefs((s) => ({ ...s, autoNavigate: v }))} last />
+          <Row icon="toll" label="Avoid toll roads" sublabel="Prefer toll-free routes on trips" value={navPrefs.avoidTolls} onValueChange={(v) => setPref('avoidTolls', v)} />
+          <Row icon="navigation" label="Auto-start navigation" sublabel="Launch maps as soon as a trip is accepted" value={navPrefs.autoNavigate} onValueChange={(v) => setPref('autoNavigate', v)} last />
         </View>
 
         {/* Language */}
@@ -129,7 +183,7 @@ export default function SettingsScreen() {
                 key={lang}
                 style={[styles.langChip, navPrefs.language === lang && styles.langChipActive]}
                 activeOpacity={0.85}
-                onPress={() => setNavPrefs((s) => ({ ...s, language: lang }))}
+                onPress={() => setPref('language', lang)}
               >
                 <Text style={[styles.langChipText, navPrefs.language === lang && styles.langChipTextActive]}>{lang}</Text>
               </TouchableOpacity>

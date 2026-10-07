@@ -1,5 +1,5 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,14 @@ import { useAuth } from '../../context/AuthContext';
 
 
 
+/** Human label for the Partner.kycStatus enum, used in the menu subtitle. */
+function kycSubtitle(status?: string) {
+  if (status === 'approved') return 'Verified · payouts enabled';
+  if (status === 'under_review') return 'Under review';
+  if (status === 'rejected') return 'Rejected · resubmit required';
+  return 'Aadhaar, PAN, Bank, Selfie';
+}
+
 const MENU_ROUTES: Record<string, Href> = {
   Documents: '/documents',
   'KYC Verification': '/kyc',
@@ -28,7 +36,13 @@ export default function ProfileScreen() {
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { user, logout, refresh } = useAuth();
+
+  // Pull the authoritative record so KYC status and document state are real
+  // rather than whatever was cached at login.
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const displayType = user?.vehicleType 
     ? user.vehicleType.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) 
@@ -46,9 +60,19 @@ export default function ProfileScreen() {
     return `+91 ${digits.replace(/\d(?=\d{4})/g, '*')}`;
   };
 
+  const docCount = Object.values(user?.documents || {}).filter(Boolean).length;
+
   const MENU_ITEMS = [
-    { icon: 'description', title: 'Documents', subtitle: 'RC Book, Insurance, License' },
-    { icon: 'fingerprint', title: 'KYC Verification', subtitle: 'Aadhaar, PAN, Bank, Selfie' },
+    {
+      icon: 'description',
+      title: 'Documents',
+      subtitle: docCount ? `${docCount} uploaded` : 'RC Book, Insurance, License',
+    },
+    {
+      icon: 'fingerprint',
+      title: 'KYC Verification',
+      subtitle: kycSubtitle(user?.kycStatus),
+    },
     { icon: 'account-balance', title: 'Payout Methods', subtitle: 'Add bank / UPI for payouts' },
     { icon: 'support-agent', title: 'Help & Support', subtitle: 'Contact partner support' },
   ];
@@ -78,6 +102,15 @@ export default function ProfileScreen() {
         </View>
 
         {/* Menu Items */}
+        <View style={styles.kycBanner}>
+          <MaterialIcon
+            name={user?.kycStatus === 'approved' ? 'verified' : 'info'}
+            size={16}
+            color={user?.kycStatus === 'approved' ? '#047857' : '#B45309'}
+          />
+          <Text style={styles.kycBannerText}>{kycSubtitle(user?.kycStatus)}</Text>
+        </View>
+
         <View style={styles.menuSection}>
           {MENU_ITEMS.map((item, index) => (
             <TouchableOpacity key={index} style={styles.menuItem} activeOpacity={0.8} onPress={() => handleMenuPress(item.title)}>
@@ -104,7 +137,7 @@ export default function ProfileScreen() {
           </TouchableOpacity>
           <TouchableOpacity style={styles.settingsItem} activeOpacity={0.8} onPress={() => router.push('/settings')}>
             <Text style={styles.settingsItemText}>Language</Text>
-            <Text style={styles.settingsValue}>English</Text>
+            <Text style={styles.settingsValue}>{user?.preferences?.language || 'English'}</Text>
           </TouchableOpacity>
         </View>
 
@@ -190,6 +223,20 @@ const createStyles = (colors: any) => StyleSheet.create({
     ...type.bodySm,
     color: colors.textMuted,
     marginTop: 2,
+  },
+  kycBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.stackSm,
+    backgroundColor: colors.surfaceGray,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.stackMd,
+    paddingVertical: spacing.stackSm,
+  },
+  kycBannerText: {
+    ...type.bodySm,
+    color: colors.onSurfaceVariant,
+    flex: 1,
   },
   settingsSection: {
     marginTop: spacing.stackMd,

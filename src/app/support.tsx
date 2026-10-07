@@ -8,8 +8,8 @@ import { fonts, type, spacing, radius } from '../theme/typography';
 
 const CONTACT_OPTIONS = [
   { icon: 'call', label: 'Call Support', sub: '9 AM - 9 PM, all days', danger: false },
-  { icon: 'chat', label: 'Live Chat', sub: 'Averaging 2 min response', danger: false },
-  { icon: 'whatsapp', label: 'WhatsApp Support', sub: 'Message us anytime', danger: false },
+  { icon: 'forum', label: 'Live Chat', sub: 'Averaging 2 min response', danger: false },
+  { icon: 'chat', label: 'WhatsApp Support', sub: 'Message us anytime', danger: false },
   { icon: 'email', label: 'Email Support', sub: 'partner@ematix.in', danger: false },
 ];
 

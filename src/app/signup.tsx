@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import { fonts, type, spacing, radius } from '../theme/typography';
 import MaterialIcon from '../components/MaterialIcon';
 
-type VehicleType = 'Bike' | 'Auto' | 'Cab';
+type VehicleType = 'Bike' | 'Auto' | 'Cab' | 'Premium Cab';
 
 type FieldProps = {
   icon: string;
@@ -35,7 +35,8 @@ type FieldProps = {
 const VEHICLES: { type: VehicleType; icon: string; label: string; desc: string }[] = [
   { type: 'Bike', icon: 'two-wheeler', label: 'Bike', desc: 'Perfect for food & parcels' },
   { type: 'Auto', icon: 'electric-rickshaw', label: 'Auto', desc: 'Bigger cargo capacity' },
-  { type: 'Cab', icon: 'local-taxi', label: 'Cab', desc: 'Comfortable rides & cargo' },
+  { type: 'Cab', icon: 'local-taxi', label: 'Cab', desc: 'Economic rides' },
+  { type: 'Premium Cab', icon: 'local-taxi', label: 'Premium Cab', desc: 'Luxury rides' },
 ];
 
 const Field = ({
@@ -146,7 +147,8 @@ export default function SignupScreen() {
       // Map frontend vehicle types to backend enum
       let dbVehicleType = 'bike';
       if (vehicle === 'Auto') dbVehicleType = 'auto';
-      if (vehicle === 'Cab') dbVehicleType = 'prime_sedan';
+      if (vehicle === 'Cab') dbVehicleType = 'car';
+      if (vehicle === 'Premium Cab') dbVehicleType = 'premium_car';
 
       const response = await fetch('http://192.168.1.34:4000/api/auth/partner/register', {
         method: 'POST',
@@ -208,10 +210,10 @@ export default function SignupScreen() {
             <View style={styles.heroIcon}>
               <MaterialIcon name="two-wheeler" size={36} color={colors.primary} />
             </View>
-            <Text style={styles.heroEyebrow}>EMATIX DELIVERY</Text>
-            <Text style={styles.heroTitle}>Become a delivery partner</Text>
+            <Text style={styles.heroEyebrow}>EMATIX GO PARTNERS</Text>
+            <Text style={styles.heroTitle}>Become a partner driver</Text>
             <Text style={styles.heroSubtitle}>
-              Deliver with your own vehicle. Earn per order, on your schedule.
+              Drive & deliver with your own vehicle. Earn per trip, on your schedule.
             </Text>
           </LinearGradient>
 
