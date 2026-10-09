@@ -64,7 +64,7 @@ export default function SplashScreen() {
         {/* Branding / Logo */}
         <View style={styles.logoContainer}>
           <Image 
-            source={require('../../assets/images/bike.png')} 
+            source={require('../../assets/images/bike.jpg')} 
             style={styles.logoImage} 
             resizeMode="contain"
           />

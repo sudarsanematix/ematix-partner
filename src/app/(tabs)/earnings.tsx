@@ -1,5 +1,7 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getPartnerStats, getPartnerHistory } from '../../utils/api';
 import {
   View,
   Text,
@@ -13,16 +15,34 @@ import { fonts, type, spacing, radius } from '../../theme/typography';
 import SharedHeader from '../../components/SharedHeader';
 import MaterialIcon from '../../components/MaterialIcon';
 
-const RECENT_TRIPS = [
-  { id: '1', type: 'ride', date: 'Today, 10:42 AM', from: 'T. Nagar', to: 'Anna Nagar', amount: '₹240', status: 'Completed' },
-  { id: '2', type: 'parcel', date: 'Today, 9:15 AM', from: 'Nungambakkam', to: 'Guindy', amount: '₹125', status: 'Completed' },
-  { id: '3', type: 'ride', date: 'Yesterday, 8:30 PM', from: 'Phoenix Mall', to: 'Velachery', amount: '₹95', status: 'Completed' },
-];
+// Removed mock trips
 
 export default function EarningsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = createStyles(colors);
+  
+  const [stats, setStats] = useState<any>(null);
+  const [history, setHistory] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const token = await AsyncStorage.getItem('partnerToken');
+        if (token) {
+          const [statsRes, historyRes] = await Promise.all([
+            getPartnerStats(token).catch(() => null),
+            getPartnerHistory(token, 1, 5).catch(() => null)
+          ]);
+          if (statsRes && statsRes.stats) setStats(statsRes.stats);
+          if (historyRes && historyRes.rides) setHistory(historyRes.rides);
+        }
+      } catch (e) {
+        console.warn('Failed to fetch earnings data', e);
+      }
+    };
+    fetchData();
+  }, []);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -32,14 +52,14 @@ export default function EarningsScreen() {
         
         {/* Earnings Overview */}
         <View style={styles.earningsCard}>
-          <Text style={styles.periodText}>This Week (Sep 14 - Sep 20)</Text>
-          <Text style={styles.totalEarnings}>₹ 4,850.50</Text>
+          <Text style={styles.periodText}>Lifetime Earnings</Text>
+          <Text style={styles.totalEarnings}>₹ {stats?.totalEarnings || 0}</Text>
           
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
               <MaterialIcon name="directions-car" size={20} color={colors.primary} />
               <View style={styles.statInfo}>
-                <Text style={styles.statNum}>24</Text>
+                <Text style={styles.statNum}>{stats?.totalTrips || 0}</Text>
                 <Text style={styles.statLabel}>Trips</Text>
               </View>
             </View>
@@ -49,7 +69,7 @@ export default function EarningsScreen() {
             <View style={styles.statBox}>
               <MaterialIcon name="schedule" size={20} color={colors.primary} />
               <View style={styles.statInfo}>
-                <Text style={styles.statNum}>18h</Text>
+                <Text style={styles.statNum}>{stats?.totalOnlineTime || '0h 0m'}</Text>
                 <Text style={styles.statLabel}>Online</Text>
               </View>
             </View>
@@ -73,7 +93,7 @@ export default function EarningsScreen() {
           <Text style={styles.sectionTitle}>Recent Trips</Text>
           
           <View style={styles.tripsList}>
-            {RECENT_TRIPS.map((trip) => (
+            {history.length > 0 ? history.map((trip) => (
               <TouchableOpacity key={trip.id} style={styles.tripCard} activeOpacity={0.8} onPress={() => router.push({ pathname: '/trip-details', params: { id: trip.id } })}>
                 <View style={styles.tripLeft}>
                   <View style={[styles.iconWrap, { backgroundColor: trip.type === 'parcel' ? colors.surfaceContainerHigh : colors.lightBlueTint }]}>
@@ -84,16 +104,18 @@ export default function EarningsScreen() {
                     />
                   </View>
                   <View>
-                    <Text style={styles.tripRoute}>{trip.from} → {trip.to}</Text>
-                    <Text style={styles.tripDate}>{trip.date}</Text>
+                    <Text style={styles.tripRoute}>{trip.pickup?.address?.split(',')[0] || 'Pickup'} → {trip.dropoff?.address?.split(',')[0] || 'Drop'}</Text>
+                    <Text style={styles.tripDate}>{new Date(trip.createdAt).toLocaleDateString()}</Text>
                   </View>
                 </View>
                 <View style={styles.tripRight}>
-                  <Text style={styles.tripAmount}>{trip.amount}</Text>
+                  <Text style={styles.tripAmount}>₹{trip.price || 0}</Text>
                   <Text style={styles.tripStatus}>{trip.status}</Text>
                 </View>
               </TouchableOpacity>
-            ))}
+            )) : (
+              <Text style={{ textAlign: 'center', marginTop: 20, color: colors.textMuted }}>No recent trips.</Text>
+            )}
           </View>
         </View>
 

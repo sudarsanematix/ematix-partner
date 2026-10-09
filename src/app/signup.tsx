@@ -150,7 +150,8 @@ export default function SignupScreen() {
       if (vehicle === 'Cab') dbVehicleType = 'car';
       if (vehicle === 'Premium Cab') dbVehicleType = 'premium_car';
 
-      const response = await fetch('http://192.168.1.34:4000/api/auth/partner/register', {
+      const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://192.168.1.34:4000';
+      const response = await fetch(`${API_BASE}/api/auth/partner/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

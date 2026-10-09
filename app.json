@@ -21,8 +21,8 @@
       "softwareKeyboardLayoutMode": "resize",
       "package": "com.sudarsanematix.ematixgopartners",
       "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
       ]
@@ -59,6 +59,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "87beaf8b-ce94-4ac1-a578-2ffbabd5f3a8"
+      }
     }
   }
 }

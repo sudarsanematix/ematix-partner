@@ -36,5 +36,12 @@ export async function authedFetch(
 
   return data;
 }
+export async function getPartnerStats(token: string) {
+  return authedFetch('/api/profile/partner/stats', token);
+}
+
+export async function getPartnerHistory(token: string, page = 1, limit = 20) {
+  return authedFetch(`/api/rides/partner-history?page=${page}&limit=${limit}`, token);
+}
 
 export { API_BASE };

@@ -17,6 +17,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Linking from 'expo-linking';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
+import { File, UploadType } from 'expo-file-system';
 import { useTheme } from '../theme/ThemeProvider';
 import { buildMapTheme, type MapThemeTokens } from '../theme/mapTheme';
 import { fonts, type, spacing, radius } from '../theme/typography';
@@ -73,7 +74,7 @@ export default function ActiveRideScreen() {
   const styles = createStyles(colors, mapTheme);
   const router = useRouter();
   const { rideId } = useLocalSearchParams<{ rideId: string }>();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [ride, setRide] = useState<RideData | null>(null);
   const [rideState, setRideState] = useState<RideState>('EN_ROUTE_PICKUP');
   const [unread, setUnreadState] = useState(() => getUnread(rideId));
@@ -178,28 +179,41 @@ export default function ActiveRideScreen() {
     }
   };
 
+  const hasNavigated = useRef(false);
+
   useEffect(() => {
     if (!rideId) return;
 
     socketService.connect();
-    socketService.emit('join_ride', { rideId, role: 'partner', userId: user?.id });
+    socketService.joinRide(rideId, 'partner', user?.id);
 
     const getTargetRideId = (data: any) => data?.rideId || data?.id;
 
     const handleRideDetails = (data: any) => {
       const targetId = getTargetRideId(data);
-      if (!data || (targetId && String(targetId) !== String(rideId))) return;
+      if (!data || !targetId || String(targetId) !== String(rideId)) return;
       setRide(data);
       const s = String(data.status || '');
+
+      // Perform terminal transition exactly once if snapshot is terminal
+      if (s === 'completed' || s === 'cancelled') {
+        if (!hasNavigated.current) {
+          hasNavigated.current = true;
+          router.replace('/(tabs)/home');
+        }
+        return;
+      }
+
       if (s === 'arrived') setRideState('ARRIVED');
-      else if (s === 'en_route_dropoff' || s === 'completed') setRideState('EN_ROUTE_DROPOFF');
+      else if (s === 'en_route_dropoff') setRideState('EN_ROUTE_DROPOFF');
       else setRideState('EN_ROUTE_PICKUP');
       setInitialized(true);
     };
 
     const handleReceiveMessage = (data: any) => {
       const targetId = getTargetRideId(data);
-      if (data && String(targetId) === String(rideId) && data.sender === 'customer') {
+      if (!data || !targetId || String(targetId) !== String(rideId)) return;
+      if (data.sender === 'customer') {
         if (focusedRef.current) {
           pulse.stopAnimation();
           pulse.setValue(1);
@@ -217,7 +231,8 @@ export default function ActiveRideScreen() {
 
     const handleRideError = (data: any) => {
       console.log('[PartnerActiveRide] ride_error:', data);
-      if (!data) return;
+      const targetId = getTargetRideId(data);
+      if (!data || !targetId || String(targetId) !== String(rideId)) return;
       clearVerifyTimer();
       setIsVerifying(false);
       if (data.code === 'ride_not_found' || data.code === 'unauthorized') {
@@ -238,35 +253,59 @@ export default function ActiveRideScreen() {
 
     const handleRideStatus = (data: any) => {
       const targetId = getTargetRideId(data);
-      if (!data || (targetId && String(targetId) !== String(rideId))) return;
-      if (data.status === 'arrived') setRideState('ARRIVED');
-      else if (data.status === 'en_route_dropoff') setRideState('EN_ROUTE_DROPOFF');
+      if (!data || !targetId || String(targetId) !== String(rideId)) return;
+
+      // Prevent backward state transitions
+      setRideState((prev) => {
+        if (hasNavigated.current) return prev;
+        const order = ['EN_ROUTE_PICKUP', 'ARRIVED', 'EN_ROUTE_DROPOFF'];
+        let next = prev;
+        if (data.status === 'arrived') next = 'ARRIVED';
+        else if (data.status === 'en_route_dropoff') next = 'EN_ROUTE_DROPOFF';
+
+        if (order.indexOf(prev) > order.indexOf(next)) return prev;
+        return next;
+      });
     };
 
     const handleRideStarted = (data: any) => {
       const targetId = getTargetRideId(data);
-      if (!data || (targetId && String(targetId) !== String(rideId))) return;
+      if (!data || !targetId || String(targetId) !== String(rideId)) return;
       clearVerifyTimer();
       setShowOtpModal(false);
       setOtpInput('');
       setOtpError('');
       setIsVerifying(false);
-      setRideState('EN_ROUTE_DROPOFF');
+
+      setRideState((prev) => {
+        const order = ['EN_ROUTE_PICKUP', 'ARRIVED', 'EN_ROUTE_DROPOFF'];
+        if (order.indexOf(prev) > order.indexOf('EN_ROUTE_DROPOFF')) return prev;
+        return 'EN_ROUTE_DROPOFF';
+      });
     };
 
     const handleRideCompleted = (data: any) => {
       const targetId = getTargetRideId(data);
-      if (!data || (targetId && String(targetId) !== String(rideId))) return;
+      if (!data || !targetId || String(targetId) !== String(rideId)) return;
+      clearVerifyTimer();
+      setIsVerifying(false);
+      setShowDropoffModal(false);
+      if (hasNavigated.current) return;
+      hasNavigated.current = true;
       router.replace('/(tabs)/home');
     };
 
     const handleRideCancelled = (data: any) => {
       const targetId = getTargetRideId(data);
-      if (!data || (targetId && String(targetId) !== String(rideId))) return;
+      if (!data || !targetId || String(targetId) !== String(rideId)) return;
+      if (hasNavigated.current) return;
+      hasNavigated.current = true;
       router.replace('/(tabs)/home');
     };
 
     const handleOtpError = (data: any) => {
+      const targetId = getTargetRideId(data);
+      if (!data || !targetId || String(targetId) !== String(rideId)) return;
       clearVerifyTimer();
       setOtpError(data?.message || 'Invalid PIN. Please try again.');
       setIsVerifying(false);
@@ -441,28 +480,33 @@ export default function ActiveRideScreen() {
     setIsUploading(true);
 
     try {
-      const formData = new FormData();
       const filename = photoUri.split('/').pop() || 'photo.jpg';
       const match = /\.(\w+)$/.exec(filename);
       const type = match ? `image/${match[1]}` : 'image/jpeg';
 
-      formData.append('document', { uri: photoUri, name: filename, type } as any);
-
       const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://192.168.1.34:4000';
-      const res = await fetch(`${API_BASE}/api/upload`, {
-        method: 'POST',
-        body: formData,
+      const file = new File(photoUri);
+
+      const result = await file.upload(`${API_BASE}/api/rides/${rideId}/proof`, {
+        httpMethod: 'POST',
+        uploadType: UploadType.MULTIPART,
+        fieldName: 'photo',
+        mimeType: type,
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
       });
-      const data = await res.json();
-      if (data.success && data.fileUrl) {
-        socketService.emit('verify_dropoff', { rideId, partnerId: user?.id, otp, photoUrl: data.fileUrl });
+
+      const data = JSON.parse(result.body);
+      if (data.success && data.proofFileName) {
+        socketService.emit('verify_dropoff', { rideId, partnerId: user?.id, otp, photoUrl: data.proofFileName });
         setIsVerifying(true);
         clearVerifyTimer();
         verifyTimer.current = setTimeout(() => {
           setIsVerifying(false);
           setIsUploading(false);
           setOtpError('Verification timed out. Please try again.');
-        }, 10000);
+        }, 30000);
       } else {
         setOtpError('Failed to upload photo');
         setIsUploading(false);

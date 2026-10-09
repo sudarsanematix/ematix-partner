@@ -1,5 +1,7 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getPartnerStats, getPartnerHistory } from '../utils/api';
 import {
   View,
   Text,
@@ -13,13 +15,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { fonts, type, spacing, radius } from '../theme/typography';
 import MaterialIcon from '../components/MaterialIcon';
 
-const TRANSACTIONS = [
-  { id: '1', title: 'Trip Earnings', date: 'Today, 10:45 AM', amount: '+₹240', type: 'credit' },
-  { id: '2', title: 'Withdrawal to Bank', date: 'Yesterday, 11:30 PM', amount: '-₹1,500', type: 'debit' },
-  { id: '3', title: 'Trip Earnings', date: 'Yesterday, 8:30 PM', amount: '+₹95', type: 'credit' },
-  { id: '4', title: 'Weekly Bonus', date: 'Sep 17, 10:00 AM', amount: '+₹500', type: 'credit' },
-];
-
+// Removed mock TRANSACTIONS
 export default function WalletScreen() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -27,6 +23,28 @@ export default function WalletScreen() {
 
   const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
+  
+  const [stats, setStats] = useState<any>(null);
+  const [history, setHistory] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const token = await AsyncStorage.getItem('partnerToken');
+        if (token) {
+          const [statsRes, historyRes] = await Promise.all([
+            getPartnerStats(token).catch(() => null),
+            getPartnerHistory(token, 1, 10).catch(() => null)
+          ]);
+          if (statsRes && statsRes.stats) setStats(statsRes.stats);
+          if (historyRes && historyRes.rides) setHistory(historyRes.rides);
+        }
+      } catch (e) {
+        console.warn('Failed to fetch wallet data', e);
+      }
+    };
+    fetchData();
+  }, []);
 
   const handleWithdraw = () => {
     setWithdrawModalVisible(false);
@@ -55,7 +73,7 @@ export default function WalletScreen() {
         {/* Balance Card */}
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Available Balance</Text>
-          <Text style={styles.balanceAmount}>₹ 4,850.50</Text>
+          <Text style={styles.balanceAmount}>₹ {stats?.totalEarnings || 0}</Text>
           <View style={styles.balanceMetaRow}>
             <View style={styles.metaBadge}>
               <MaterialIcon name="trending-up" size={16} color={colors.primaryContainer} />
@@ -87,32 +105,34 @@ export default function WalletScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Recent Transactions</Text>
           <View style={styles.transactionsList}>
-            {TRANSACTIONS.map((txn) => (
+            {history.length > 0 ? history.map((txn) => (
               <View key={txn.id} style={styles.txnItem}>
                 <View style={styles.txnLeft}>
                   <View style={[
                     styles.txnIconWrap, 
-                    { backgroundColor: txn.type === 'credit' ? colors.lightBlueTint : colors.surfaceContainerHigh }
+                    { backgroundColor: colors.lightBlueTint }
                   ]}>
                     <MaterialIcon 
-                      name={txn.type === 'credit' ? "arrow-downward" : "arrow-upward"} 
+                      name="arrow-downward" 
                       size={20} 
-                      color={txn.type === 'credit' ? colors.primary : colors.textMuted} 
+                      color={colors.primary} 
                     />
                   </View>
                   <View style={styles.txnInfo}>
-                    <Text style={styles.txnTitle}>{txn.title}</Text>
-                    <Text style={styles.txnDate}>{txn.date}</Text>
+                    <Text style={styles.txnTitle}>Trip Earnings</Text>
+                    <Text style={styles.txnDate}>{new Date(txn.createdAt).toLocaleString()}</Text>
                   </View>
                 </View>
                 <Text style={[
                   styles.txnAmount, 
-                  { color: txn.type === 'credit' ? colors.primary : colors.onSurface }
+                  { color: colors.primary }
                 ]}>
-                  {txn.amount}
+                  +₹{txn.price || 0}
                 </Text>
               </View>
-            ))}
+            )) : (
+              <Text style={{ textAlign: 'center', marginTop: 20, color: colors.textMuted }}>No recent transactions.</Text>
+            )}
           </View>
         </View>
       </ScrollView>

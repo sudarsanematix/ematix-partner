@@ -24,6 +24,7 @@ import { formatFare } from '../../utils/phone';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CHENNAI_REGION } from '../../components/RealMap';
+import { getPartnerStats } from '../../utils/api';
 
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
@@ -40,6 +41,24 @@ export default function HomeScreen() {
   const [highDemandZones, setHighDemandZones] = useState<any[]>([]);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestRef = useRef<any>(null);
+  const [partnerStats, setPartnerStats] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const token = await AsyncStorage.getItem('partnerToken');
+        if (token) {
+          const res = await getPartnerStats(token);
+          if (res.success && res.stats) {
+            setPartnerStats(res.stats);
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to fetch stats', e);
+      }
+    };
+    fetchStats();
+  }, []);
 
   useEffect(() => {
     requestRef.current = currentRequest;
@@ -53,6 +72,10 @@ export default function HomeScreen() {
   };
 
   const closeRequest = () => {
+    if (requestTimer.current) {
+      clearTimeout(requestTimer.current);
+      requestTimer.current = null;
+    }
     setHasRequest(false);
     setCurrentRequest(null);
     setAccepting(false);
@@ -92,10 +115,11 @@ export default function HomeScreen() {
       };
 
       // Track real live location
+      let isCancelled = false;
       let locationSubscription: Location.LocationSubscription | null = null;
       (async () => {
         try {
-          locationSubscription = await Location.watchPositionAsync(
+          const sub = await Location.watchPositionAsync(
             { accuracy: Location.Accuracy.Highest, timeInterval: 5000, distanceInterval: 5 },
             (loc) => {
               const { latitude, longitude, accuracy } = loc.coords;
@@ -121,6 +145,11 @@ export default function HomeScreen() {
               }
             }
           );
+          if (isCancelled) {
+            sub.remove();
+          } else {
+            locationSubscription = sub;
+          }
         } catch (err) {
           console.warn('Watch location error:', err);
         }
@@ -135,7 +164,7 @@ export default function HomeScreen() {
       const handleRideAssigned = (data: any) => {
         console.log('[Partner App] Ride assigned:', data);
         closeRequest();
-        if (data?.id) {
+        if (data?.id && (!data.partner || data.partner.id === user?.id)) {
           router.push(`/active-ride?rideId=${data.id}`);
         }
       };
@@ -157,6 +186,7 @@ export default function HomeScreen() {
       socketService.emit('get_hotspots', {});
 
       return () => {
+        isCancelled = true;
         if (locationSubscription) {
           locationSubscription.remove();
         }
@@ -168,11 +198,6 @@ export default function HomeScreen() {
       };
     } else {
       closeRequest();
-      socketService.off('new_ride_request');
-      socketService.off('ride_unavailable');
-      socketService.off('ride_assigned');
-      socketService.off('ride_error');
-      socketService.off('hotspots_data');
       socketService.disconnect();
     }
   }, [isOnline, router]);
@@ -201,7 +226,16 @@ export default function HomeScreen() {
   const acceptRide = () => {
     if (!currentRequest?.id || accepting) return;
     setAccepting(true);
-    socketService.emit('accept_ride', { rideId: currentRequest.id, partnerId: user?.id });
+    
+    const rideId = currentRequest.id;
+    socketService.emit('accept_ride', { rideId, partnerId: user?.id });
+    
+    requestTimer.current = setTimeout(() => {
+      if (requestRef.current && requestRef.current.id === rideId) {
+        setAccepting(false);
+        Alert.alert('Timeout', 'No response from server. Please try again.');
+      }
+    }, 10000);
   };
 
   const kycStatus = user?.kycStatus || 'pending';
@@ -333,40 +367,26 @@ export default function HomeScreen() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsScroll}>
           <View style={[styles.statCard, { backgroundColor: colors.primary }]}>
             <Text style={[styles.statLabel, { color: colors.onPrimaryContainer }]}>Earnings</Text>
-            <Text style={[styles.statValue, { color: colors.onPrimary }]}>₹ 1,240</Text>
+            <Text style={[styles.statValue, { color: colors.onPrimary }]}>₹ {partnerStats?.todayEarnings || 0}</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statLabel}>Trips Done</Text>
-            <Text style={styles.statValue}>8</Text>
+            <Text style={styles.statValue}>{partnerStats?.todayTrips || 0}</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statLabel}>Acceptance</Text>
-            <Text style={styles.statValue}>94%</Text>
+            <Text style={styles.statValue}>{partnerStats?.acceptanceRate || 0}%</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statLabel}>Online Time</Text>
-            <Text style={styles.statValue}>4h 12m</Text>
+            <Text style={styles.statValue}>{partnerStats?.onlineTime || '0h 0m'}</Text>
           </View>
         </ScrollView>
-
-        {/* Upcoming / Reserved */}
-        <Text style={styles.sectionTitle}>Upcoming Reserved Trips</Text>
-        <View style={styles.reservedCard}>
-          <View style={styles.reservedTimeWrap}>
-            <Text style={styles.reservedTime}>02:30 PM</Text>
-            <Text style={styles.reservedDate}>Today</Text>
-          </View>
-          <View style={styles.reservedInfo}>
-            <Text style={styles.reservedRoute}>Airport Drop</Text>
-            <Text style={styles.reservedSub}>Guindy → Chennai Intl Airport</Text>
-          </View>
-          <Text style={styles.reservedPayout}>₹450</Text>
-        </View>
 
       </ScrollView>
 
       {/* Incoming Request Bottom Sheet Overlay */}
-      <Modal transparent={true} visible={hasRequest} animationType="fade" onRequestClose={() => setHasRequest(false)}>
+      <Modal transparent={true} visible={hasRequest} animationType="fade" onRequestClose={closeRequest}>
         <View style={styles.requestSheetOverlay}>
           <View style={styles.requestSheet}>
             <View style={styles.sheetHandle} />
@@ -424,8 +444,9 @@ export default function HomeScreen() {
 const createStyles = (colors: any, mapTheme: MapThemeTokens) => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.surfaceContainerLowest },
   header: {
-    padding: spacing.marginMobile,
-    paddingTop: Platform.OS === 'android' ? 40 : 16,
+    paddingHorizontal: spacing.marginMobile,
+    paddingBottom: spacing.marginMobile,
+    paddingTop: 8,
     backgroundColor: colors.surfaceContainerLowest,
     zIndex: 10,
   },
