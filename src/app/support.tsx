@@ -1,6 +1,7 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { useRouter } from 'expo-router';
 import SharedHeader from '../components/SharedHeader';
 import MaterialIcon from '../components/MaterialIcon';
 import { useTheme } from '../theme/ThemeProvider';
@@ -35,6 +36,7 @@ const FAQS = [
 export default function SupportScreen() {
   const { colors } = useTheme();
   const styles = createStyles(colors);
+  const router = useRouter();
 
   const [faqOpen, setFaqOpen] = useState<number | null>(0);
   const [toast, setToast] = useState<string | null>(null);
@@ -42,6 +44,14 @@ export default function SupportScreen() {
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2400);
+  };
+
+  const handleContactPress = (label: string) => {
+    if (label === 'Live Chat') {
+      router.push('/support-chat');
+      return;
+    }
+    showToast(`Launching ${label}…`);
   };
 
   return (
@@ -56,7 +66,7 @@ export default function SupportScreen() {
               key={opt.label}
               style={styles.optionRow}
               activeOpacity={0.7}
-              onPress={() => showToast(`Launching ${opt.label}…`)}
+              onPress={() => handleContactPress(opt.label)}
             >
               <View style={styles.optionIconWrap}>
                 <MaterialIcon name={opt.icon as any} size={20} color={colors.primary} />
@@ -95,10 +105,19 @@ export default function SupportScreen() {
         <TouchableOpacity
           style={styles.reportBtn}
           activeOpacity={0.85}
-          onPress={() => showToast('Issue submitted — ticket #EMX-3412')}
+          onPress={() => router.push('/support-ticket')}
         >
           <MaterialIcon name="flag" size={18} color={colors.onPrimary} />
           <Text style={styles.reportBtnText}>Report a Problem</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.ticketsBtn}
+          activeOpacity={0.85}
+          onPress={() => router.push('/support-tickets')}
+        >
+          <MaterialIcon name="confirmation-number" size={18} color={colors.primary} />
+          <Text style={styles.ticketsBtnText}>My Tickets</Text>
         </TouchableOpacity>
 
         <Text style={styles.responseTime}>We usually respond within 2 business hours.</Text>
@@ -201,6 +220,22 @@ const createStyles = (colors: any) => StyleSheet.create({
   reportBtnText: {
     ...type.labelLg,
     color: colors.onPrimary,
+  },
+  ticketsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.stackSm,
+    backgroundColor: colors.surfaceContainerLowest,
+    borderWidth: 1,
+    borderColor: colors.surfaceContainer,
+    padding: spacing.stackMd,
+    borderRadius: radius.lg,
+    marginTop: spacing.stackSm,
+  },
+  ticketsBtnText: {
+    ...type.labelLg,
+    color: colors.primary,
   },
   responseTime: {
     ...type.bodySm,

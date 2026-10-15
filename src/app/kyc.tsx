@@ -126,16 +126,47 @@ export default function KYCScreen() {
   const bankFilled =
     (ifsc.trim().length >= 6 && acctNo.replace(/\D/g, '').length >= 6) ||
     upiId.includes('@');
-  const isFormValid =
-    !isApproved &&
-    allDocsUploaded &&
-    aadhaarNumber.replace(/\D/g, '').length === 12 &&
-    panNumber.trim().length === 10 &&
-    acctName.trim().length > 1 &&
-    bankFilled &&
-    ecName.trim().length > 1 &&
-    ecPhone.replace(/\D/g, '').length === 10 &&
-    consent;
+
+  const missingRequirements = useMemo(() => {
+    const list: string[] = [];
+    if (uploadedCount < requiredDocs.length) {
+      list.push(`${requiredDocs.length - uploadedCount} document${requiredDocs.length - uploadedCount === 1 ? '' : 's'} remaining to upload`);
+    }
+    if (aadhaarNumber.replace(/\D/g, '').length !== 12) {
+      list.push('Valid 12-digit Aadhaar number');
+    }
+    if (panNumber.trim().length !== 10) {
+      list.push('Valid 10-character PAN number');
+    }
+    if (acctName.trim().length <= 1) {
+      list.push('Account holder name');
+    }
+    if (!bankFilled) {
+      list.push('Bank details (IFSC + Account No) or UPI ID');
+    }
+    if (ecName.trim().length <= 1) {
+      list.push('Emergency contact name');
+    }
+    if (ecPhone.replace(/\D/g, '').length !== 10) {
+      list.push('10-digit emergency contact phone');
+    }
+    if (!consent) {
+      list.push('Background check authorization consent');
+    }
+    return list;
+  }, [
+    uploadedCount,
+    requiredDocs.length,
+    aadhaarNumber,
+    panNumber,
+    acctName,
+    bankFilled,
+    ecName,
+    ecPhone,
+    consent,
+  ]);
+
+  const isFormValid = !isApproved && missingRequirements.length === 0;
 
   /**
    * Re-reads the server's document state.
@@ -236,7 +267,7 @@ export default function KYCScreen() {
     setUploadingKey(key);
     const record = await uploadDocument(uri, key, token);
     setUploadingKey(null);
-    if (record) {
+    if (record && 'fileName' in record) {
       // Preview only. The row's real status comes from the refresh below.
       setLocalUris((prev) => ({ ...prev, [key]: uri }));
       try {
@@ -247,12 +278,23 @@ export default function KYCScreen() {
       }
       Alert.alert('Uploaded', 'Document uploaded successfully.');
     } else {
-      Alert.alert('Upload failed', 'Could not upload the document. Please try again.');
+      const errMsg = (record && 'reason' in record && record.reason) || 'Could not upload the document. Please try again.';
+      Alert.alert('Upload failed', errMsg);
     }
   }, [token, loadServerDocs]);
 
   const handleSubmit = async () => {
-    if (!isFormValid) return;
+    if (isApproved) return;
+    if (!isFormValid) {
+      if (missingRequirements.length > 0) {
+        Alert.alert(
+          'Incomplete Verification Form',
+          'Please complete the following before submitting:\n\n• ' +
+            missingRequirements.join('\n• ')
+        );
+      }
+      return;
+    }
     if (!user?.phone || !token) {
       setErrorMsg('Session expired. Please login again.');
       return;
@@ -520,10 +562,17 @@ export default function KYCScreen() {
         </ScrollView>
 
         <View style={styles.footer}>
+          {!isFormValid && !isApproved && missingRequirements.length > 0 && (
+            <Text style={styles.missingHintText}>
+              {missingRequirements.length === 1
+                ? `1 requirement left: ${missingRequirements[0]}`
+                : `${missingRequirements.length} requirements left to enable submission`}
+            </Text>
+          )}
           <TouchableOpacity
             style={[styles.primaryBtn, (!isFormValid || loading) && styles.primaryBtnDisabled]}
             activeOpacity={0.85}
-            disabled={!isFormValid || loading}
+            disabled={loading || isApproved}
             onPress={handleSubmit}
           >
             {loading ? (
@@ -535,10 +584,14 @@ export default function KYCScreen() {
               </>
             ) : (
               <>
-                <Text style={styles.primaryBtnText}>
+                <Text style={[styles.primaryBtnText, !isFormValid && styles.primaryBtnTextDisabled]}>
                   {rejectedCount > 0 ? 'Resubmit for Verification' : 'Submit for Verification'}
                 </Text>
-                <MaterialIcon name="check" size={18} color={colors.onPrimary} />
+                <MaterialIcon
+                  name="check"
+                  size={18}
+                  color={!isFormValid ? colors.textMuted : colors.onPrimary}
+                />
               </>
             )}
           </TouchableOpacity>
@@ -778,6 +831,12 @@ const createStyles = (colors: any) => StyleSheet.create({
     borderTopColor: colors.surfaceContainer,
     backgroundColor: colors.surface,
   },
+  missingHintText: {
+    ...type.bodySm,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: spacing.stackSm,
+  },
   primaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -793,5 +852,8 @@ const createStyles = (colors: any) => StyleSheet.create({
   primaryBtnText: {
     ...type.labelLg,
     color: colors.onPrimary,
+  },
+  primaryBtnTextDisabled: {
+    color: colors.textMuted,
   },
 });

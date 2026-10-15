@@ -22,6 +22,7 @@ import { socketService } from '../../utils/socket';
 import { useAuth } from '../../context/AuthContext';
 import { formatFare } from '../../utils/phone';
 import * as Location from 'expo-location';
+import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CHENNAI_REGION } from '../../components/RealMap';
 import { getPartnerStats } from '../../utils/api';
@@ -42,6 +43,43 @@ export default function HomeScreen() {
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestRef = useRef<any>(null);
   const [partnerStats, setPartnerStats] = useState<any>(null);
+  const [offerSecondsLeft, setOfferSecondsLeft] = useState<number | null>(null);
+
+  // Looping buzzer for an incoming offer. The asset is a short WAV the player
+  // repeats; it is silenced the moment the offer is accepted, declined or
+  // otherwise closed.
+  const orderBuzzer = useAudioPlayer(require('../../../assets/sounds/order_alert.wav'));
+
+  const stopBuzzer = () => {
+    orderBuzzer.pause();
+    orderBuzzer.seekTo(0).catch(() => {});
+  };
+
+  // Loop the alert and make sure it is audible even when the phone is on silent.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability -- expo-audio player loop is a settable property
+    orderBuzzer.loop = true;
+    setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
+  }, [orderBuzzer]);
+
+  // Drive the buzzer from the offer sheet: ring while it is up, stop when it
+  // goes away (accept, decline, expiry, reassignment or going offline).
+  useEffect(() => {
+    if (!hasRequest) {
+      stopBuzzer();
+      return;
+    }
+    (async () => {
+      try {
+        await setAudioModeAsync({ playsInSilentMode: true });
+        await orderBuzzer.seekTo(0);
+        orderBuzzer.play();
+      } catch {
+        // Best-effort: a missing audio route must never block the offer.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasRequest]);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -76,9 +114,41 @@ export default function HomeScreen() {
       clearTimeout(requestTimer.current);
       requestTimer.current = null;
     }
+    stopBuzzer();
     setHasRequest(false);
     setCurrentRequest(null);
     setAccepting(false);
+  };
+
+  // Mirror the backend's offer deadline. The server owns the timer and will
+  // reassign the ride to the next partner when it lapses; the app only renders
+  // the remaining time and closes the sheet at zero.
+  useEffect(() => {
+    const deadline = currentRequest?.offerExpiresAt
+      ? new Date(currentRequest.offerExpiresAt).getTime()
+      : NaN;
+
+    if (!hasRequest || !Number.isFinite(deadline)) {
+      setOfferSecondsLeft(null);
+      return;
+    }
+
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      setOfferSecondsLeft(remaining);
+      if (remaining <= 0) closeRequest();
+    };
+
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [hasRequest, currentRequest?.id, currentRequest?.offerExpiresAt]);
+
+  const declineRequest = () => {
+    if (currentRequest?.id) {
+      socketService.emit('reject_ride', { rideId: currentRequest.id });
+    }
+    closeRequest();
   };
 
   const locateMe = async () => {
@@ -226,10 +296,13 @@ export default function HomeScreen() {
   const acceptRide = () => {
     if (!currentRequest?.id || accepting) return;
     setAccepting(true);
-    
+    // Silence the alert as soon as the partner commits, even before the server
+    // confirms the assignment and the sheet closes.
+    stopBuzzer();
+
     const rideId = currentRequest.id;
     socketService.emit('accept_ride', { rideId, partnerId: user?.id });
-    
+
     requestTimer.current = setTimeout(() => {
       if (requestRef.current && requestRef.current.id === rideId) {
         setAccepting(false);
@@ -241,11 +314,11 @@ export default function HomeScreen() {
   const kycStatus = user?.kycStatus || 'pending';
   const uploadedCount = Object.values(user?.documents || {}).filter(Boolean).length;
   // A rough estimate of total documents based on the fallback list in kyc.tsx
-  const totalDocs = 9; 
-  
+  const totalDocs = 9;
+
   let kycTitle = 'Complete your KYC';
   let kycSub = `${uploadedCount} of ${totalDocs} steps done · unlock your first payout`;
-  
+
   if (kycStatus === 'under_review') {
     kycTitle = 'KYC Under Review';
     kycSub = 'We are verifying your documents';
@@ -254,13 +327,30 @@ export default function HomeScreen() {
     kycSub = 'Some documents need your attention';
   }
 
+  const offerTotalSeconds = Math.max(
+    1,
+    Math.round((currentRequest?.responseTimeoutMs || 30000) / 1000)
+  );
+  const offerUrgent = offerSecondsLeft !== null && offerSecondsLeft <= 5;
+  const offerProgress =
+    offerSecondsLeft !== null
+      ? Math.max(0, Math.min(100, (offerSecondsLeft / offerTotalSeconds) * 100))
+      : 100;
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <View style={styles.headerLeft}>
-            <Text style={styles.greeting}>{`${greeting()}, ${user?.name || user?.phone || 'Partner'}`}</Text>
-          </View>
+        <View style={styles.brandRow}>
+          <TouchableOpacity
+            style={styles.logoRow}
+            activeOpacity={0.7}
+            onPress={() => router.replace('/(tabs)/home')}
+          >
+            <View style={styles.logoPlaceholder}>
+              <Text style={styles.logoText}>E</Text>
+            </View>
+            <Text style={styles.brandName}>Ematix</Text>
+          </TouchableOpacity>
           <View style={styles.headerRight}>
             <TouchableOpacity style={styles.iconBtn} accessibilityLabel="Notifications" accessibilityRole="button" hitSlop={8} onPress={() => router.push('/notifications')}>
               <MaterialIcon name="notifications" size={24} color={colors.onSurface} />
@@ -279,6 +369,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
+        <Text style={styles.greeting}>{`${greeting()}, ${user?.name || user?.phone || 'Partner'}`}</Text>
 
         {/* Action Toggle (Slide-like design) */}
         {isOnline ? (
@@ -399,6 +490,27 @@ export default function HomeScreen() {
               </Text>
             ) : null}
 
+            {offerSecondsLeft !== null && (
+              <View style={styles.countdownWrap}>
+                <View style={styles.countdownTrack}>
+                  <View
+                    style={[
+                      styles.countdownFill,
+                      {
+                        width: `${offerProgress}%`,
+                        backgroundColor: offerUrgent ? colors.accentRed : colors.primary,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={[styles.countdownText, offerUrgent && { color: colors.accentRed }]}>
+                  {offerSecondsLeft > 0
+                    ? `Auto-accepting by the next partner in ${offerSecondsLeft}s`
+                    : 'Offer expired — finding another partner'}
+                </Text>
+              </View>
+            )}
+
             {currentRequest?.type === 'parcel' && currentRequest?.packageDetails && (
               <View style={{ backgroundColor: 'rgba(0,33,124,0.05)', padding: 12, borderRadius: 8, marginVertical: 8 }}>
                 <Text style={{ fontSize: 13, fontWeight: '600', color: colors.primary, marginBottom: 4 }}>
@@ -426,7 +538,7 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.requestActions}>
-              <TouchableOpacity style={styles.declineBtn} onPress={closeRequest}>
+              <TouchableOpacity style={styles.declineBtn} onPress={declineRequest}>
                 <Text style={styles.declineText}>Decline</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.acceptBtn} onPress={acceptRide} disabled={accepting}>
@@ -450,19 +562,41 @@ const createStyles = (colors: any, mapTheme: MapThemeTokens) => StyleSheet.creat
     backgroundColor: colors.surfaceContainerLowest,
     zIndex: 10,
   },
-  headerTop: {
+  brandRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 16,
   },
-  headerLeft: {
-    flexDirection: 'column',
-    gap: 4,
+  logoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  logoPlaceholder: {
+    width: 28,
+    height: 28,
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.stackSm,
+  },
+  logoText: {
+    color: colors.onPrimary,
+    fontWeight: '700',
+    fontSize: 16,
+    fontFamily: fonts.bold,
+  },
+  brandName: {
+    ...type.headlineSm,
+    color: colors.primary,
+    letterSpacing: -0.3,
+    fontFamily: fonts.semibold,
   },
   greeting: {
     ...type.headlineSm,
     color: colors.onSurface,
+    marginBottom: 24,
   },
   headerRight: {
     flexDirection: 'row',
@@ -562,7 +696,7 @@ const createStyles = (colors: any, mapTheme: MapThemeTokens) => StyleSheet.creat
     color: colors.onSurface,
   },
   mapContainer: {
-    height: 220,
+    height: 400,
     width: '100%',
     position: 'relative',
     backgroundColor: colors.surfaceContainer,
@@ -739,6 +873,26 @@ const createStyles = (colors: any, mapTheme: MapThemeTokens) => StyleSheet.creat
     textAlign: 'center',
     marginTop: -18,
     marginBottom: 16,
+  },
+  countdownWrap: {
+    marginBottom: 20,
+  },
+  countdownTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.surfaceContainerHigh,
+    overflow: 'hidden',
+  },
+  countdownFill: {
+    height: '100%',
+    borderRadius: 3,
+    backgroundColor: colors.primary,
+  },
+  countdownText: {
+    ...type.labelSm,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: 8,
   },
   requestRow: {
     flexDirection: 'row',

@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { Tabs, useRouter } from 'expo-router';
 import { StyleSheet, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/ThemeProvider';
 import { fonts, type } from '../../theme/typography';
 import MaterialIcon from '../../components/MaterialIcon';
@@ -10,6 +11,7 @@ export default function TabLayout() {
   const { colors, isDark } = useTheme();
   const { user, loading } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!loading && !user) {
@@ -21,11 +23,26 @@ export default function TabLayout() {
     return null;
   }
 
+  const TAB_BAR_CONTENT_HEIGHT = 60;
+  const dynamicTabBarStyle = {
+    position: 'absolute' as const,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: Platform.OS === 'android' 
+      ? TAB_BAR_CONTENT_HEIGHT + insets.bottom 
+      : 85,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'android' 
+      ? Math.max(insets.bottom, 8) 
+      : 28,
+  };
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: [styles.tabBar, { backgroundColor: isDark ? 'rgba(18, 18, 26, 0.95)' : 'rgba(252, 249, 248, 0.95)' }],
+        tabBarStyle: [styles.tabBar, dynamicTabBarStyle, { backgroundColor: isDark ? 'rgba(18, 18, 26, 0.95)' : 'rgba(252, 249, 248, 0.95)' }],
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.onSurfaceVariant,
         tabBarShowLabel: true,
@@ -68,16 +85,11 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   tabBar: {
     borderTopWidth: 0,
-    height: Platform.OS === 'ios' ? 85 : 65,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 8,
-    paddingTop: 8,
     shadowColor: '#111',
     shadowOffset: { width: 0, height: -8 },
     shadowOpacity: 0.06,
     shadowRadius: 24,
     elevation: 10,
-    position: 'absolute',
-    bottom: 0,
   },
   tabLabel: {
     ...type.labelSm,

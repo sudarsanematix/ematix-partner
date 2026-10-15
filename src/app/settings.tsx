@@ -1,6 +1,6 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import SharedHeader from '../components/SharedHeader';
 import MaterialIcon, { MaterialIconName } from '../components/MaterialIcon';
@@ -129,6 +129,48 @@ export default function SettingsScreen() {
     });
   };
 
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account?',
+      'Are you sure you want to delete your partner account? All your KYC documents, bank details, and personal records will be permanently removed. You can register afresh anytime with your phone number.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Permanently',
+          style: 'destructive',
+          onPress: async () => {
+            if (!token) return;
+            setIsDeleting(true);
+            try {
+              const res = await authedFetch('/api/profile/partner', token, {
+                method: 'DELETE',
+              });
+              if (res?.success) {
+                Alert.alert('Account Deleted', 'Your partner account has been deleted successfully.', [
+                  {
+                    text: 'OK',
+                    onPress: async () => {
+                      await logout();
+                      router.replace('/login');
+                    },
+                  },
+                ]);
+              } else {
+                Alert.alert('Error', res?.message || 'Could not delete account. Please try again.');
+              }
+            } catch (err: any) {
+              Alert.alert('Cannot Delete Account', err?.message || 'Something went wrong. Please ensure no rides are active.');
+            } finally {
+              setIsDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <SharedHeader currentScreen="settings" title="Settings" />
@@ -198,6 +240,30 @@ export default function SettingsScreen() {
           <Row icon="description" label="Partner Agreement" onPress={() => router.back()} />
           <Row icon="privacy-tip" label="Privacy Policy" onPress={() => router.back()} />
           <Row icon="verified-user" label="About" sublabel="Ematix Partner v1.0.0" onPress={() => router.back()} last />
+        </View>
+
+        {/* Account Management */}
+        <Text style={styles.groupTitle}>Account</Text>
+        <View style={styles.group}>
+          <TouchableOpacity
+            style={[styles.optionRow, styles.optionRowLast]}
+            activeOpacity={0.7}
+            onPress={handleDeleteAccount}
+            disabled={isDeleting}
+          >
+            <View style={[styles.optionIconWrap, { backgroundColor: '#FEE2E2' }]}>
+              {isDeleting ? (
+                <ActivityIndicator size="small" color={colors.accentRed} />
+              ) : (
+                <MaterialIcon name="delete-forever" size={20} color={colors.accentRed} />
+              )}
+            </View>
+            <View style={styles.optionTextWrap}>
+              <Text style={[styles.optionText, { color: colors.accentRed }]}>Delete Account</Text>
+              <Text style={styles.optionSub}>Permanently delete account and clear personal data</Text>
+            </View>
+            <MaterialIcon name="chevron-right" size={20} color={colors.outlineVariant} />
+          </TouchableOpacity>
         </View>
 
         <TouchableOpacity style={styles.logoutBtn} activeOpacity={0.85} onPress={async () => {

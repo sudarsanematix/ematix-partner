@@ -1,7 +1,7 @@
 import { Stack, useRouter, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { ThemeProvider } from '../theme/ThemeProvider';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, Inter_800ExtraBold } from '@expo-google-fonts/inter';
@@ -75,7 +75,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
         <ThemeProvider>
-          <SafeAreaProvider>
+          <SafeAreaProvider initialMetrics={initialWindowMetrics}>
             <StatusBar hidden />
             <AuthGuard>
               <Stack screenOptions={{ headerShown: false }}>

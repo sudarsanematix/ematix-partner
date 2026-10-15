@@ -55,7 +55,9 @@
           "cameraPermission": "Ematix Partner needs the camera so you can photograph delivery proof at pickup and drop-off.",
           "microphonePermission": false
         }
-      ]
+      ],
+      "@rnmapbox/maps",
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true

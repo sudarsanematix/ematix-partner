@@ -14,6 +14,10 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { fonts, type, spacing, radius } from '../../theme/typography';
 import SharedHeader from '../../components/SharedHeader';
 import MaterialIcon, { MaterialIconName } from '../../components/MaterialIcon';
+import TypingIndicator from '../../components/TypingIndicator';
+import RichMessage, { Block } from '../../components/RichMessage';
+import { useAuth } from '../../context/AuthContext';
+import { authedFetch } from '../../utils/api';
 
 const DRIVER_PROMPTS = [
   { id: '1', label: 'Busy zones near me', icon: 'local-fire-department' },
@@ -26,18 +30,19 @@ type Message = {
   id: string;
   role: 'user' | 'assistant';
   text: string;
+  blocks?: Block[];
 };
 
-const INITIAL_GREETING =
-  "Hi Rajesh! I'm your Driver AI Assistant. Ask me about hotspots, earnings, or how to update your vehicle documents.";
-
-const RESPONSES: Record<string, string> = {
-  'busy zones near me': "T. Nagar and Phoenix Marketcity are surging right now. If you head towards T. Nagar, you're likely to get a ride within 2 minutes.",
-  'summarize tips': "You've earned ₹450 in tips so far this week! Your highest tipped ride was yesterday at 8:30 PM (₹150).",
-  'update rc book': "To update your RC Book, go to Profile > Vehicle Details > Documents. You can upload a clear photo of your new RC there.",
-  'peak hours today': "Today's peak hours in your area are projected to be 5:30 PM to 8:00 PM. Expect higher fares and more ride requests during this window.",
-  'default': "I'm still learning! But I can help you find hotspots, check your earnings, or manage your profile.",
+const greetingFor = (name?: string | null) => {
+  const firstName = name?.trim().split(/\s+/)[0] || 'there';
+  return `Hi ${firstName}! I'm your Driver AI Assistant. Ask me about hotspots, earnings, or how to update your vehicle documents.`;
 };
+
+const FALLBACK_REPLY =
+  "I'm still learning, but I can help you find hotspots, check your earnings, or manage your profile and documents.";
+
+const OFFLINE_REPLY =
+  "I'm having trouble reaching my assistant right now. Please check your connection and try again in a moment.";
 
 let msgId = 0;
 const nextId = () => `m${++msgId}`;
@@ -45,27 +50,42 @@ const nextId = () => `m${++msgId}`;
 export default function AskEmatixScreen() {
   const { colors } = useTheme();
   const styles = createStyles(colors);
+  const { user, token } = useAuth();
 
   const [messages, setMessages] = useState<Message[]>([
-    { id: 'greet', role: 'assistant', text: INITIAL_GREETING },
+    { id: 'greet', role: 'assistant', text: greetingFor(null) },
   ]);
+  const [isTyping, setIsTyping] = useState(false);
   const [inputText, setInputText] = useState('');
   const scrollRef = useRef<ScrollView>(null);
 
-  const handleSend = (text: string = inputText) => {
+  const handleSend = async (text: string = inputText) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || isTyping) return;
 
-    // Add user message
-    setMessages((m) => [...m, { id: nextId(), role: 'user', text: trimmed }]);
+    const userMsg: Message = { id: nextId(), role: 'user', text: trimmed };
+    setMessages((m) => [...m, userMsg]);
     setInputText('');
+    setIsTyping(true);
 
-    // Simulate AI response
-    setTimeout(() => {
-      const lower = trimmed.toLowerCase();
-      const replyText = RESPONSES[lower] || RESPONSES['default'];
-      setMessages((m) => [...m, { id: nextId(), role: 'assistant', text: replyText }]);
-    }, 800);
+    const history = [...messages, userMsg]
+      .filter((m) => m.text)
+      .map((m) => ({ role: m.role, text: m.text }));
+
+    try {
+      const data = await authedFetch('/api/assistant/chat', token, {
+        method: 'POST',
+        body: { messages: history },
+      });
+      const reply = String(data?.reply || '').trim() || FALLBACK_REPLY;
+      const blocks = Array.isArray(data?.blocks) ? (data.blocks as Block[]) : undefined;
+      setMessages((m) => [...m, { id: nextId(), role: 'assistant', text: reply, blocks }]);
+    } catch (error) {
+      console.warn('[AskEmatix] assistant request failed', error);
+      setMessages((m) => [...m, { id: nextId(), role: 'assistant', text: OFFLINE_REPLY }]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   return (
@@ -107,12 +127,25 @@ export default function AskEmatixScreen() {
                   msg.role === 'assistant' ? styles.assistantBubble : styles.userBubble,
                 ]}
               >
-                <Text style={[styles.messageText, msg.role === 'user' && styles.userMessageText]}>
-                  {msg.text}
-                </Text>
+                <RichMessage
+                  blocks={msg.id === 'greet' ? undefined : msg.blocks}
+                  text={msg.id === 'greet' ? greetingFor(user?.name) : msg.text}
+                  textColor={msg.role === 'user' ? colors.onPrimary : colors.onSurface}
+                />
               </View>
             </View>
           ))}
+
+          {isTyping && (
+            <View style={styles.row}>
+              <View style={styles.assistantAvatar}>
+                <MaterialIcon name="auto-awesome" size={14} color={colors.onPrimary} />
+              </View>
+              <View style={[styles.bubble, styles.assistantBubble, { paddingVertical: 0 }]}>
+                <TypingIndicator />
+              </View>
+            </View>
+          )}
 
           {/* Suggestions */}
           <View style={styles.promptWrap}>
@@ -146,9 +179,9 @@ export default function AskEmatixScreen() {
               returnKeyType="send"
             />
             <TouchableOpacity
-              style={[styles.sendBtn, !inputText.trim() && styles.sendBtnDisabled]}
+              style={[styles.sendBtn, (!inputText.trim() || isTyping) && styles.sendBtnDisabled]}
               activeOpacity={0.85}
-              disabled={!inputText.trim()}
+              disabled={!inputText.trim() || isTyping}
               onPress={() => handleSend()}
             >
               <MaterialIcon name="arrow-upward" size={18} color={colors.onPrimary} />
@@ -227,9 +260,6 @@ const createStyles = (colors: any) => StyleSheet.create({
     ...type.bodyMd,
     color: colors.onSurface,
     lineHeight: 20,
-  },
-  userMessageText: {
-    color: colors.onPrimary,
   },
   promptWrap: { marginTop: spacing.stackMd, flexDirection: 'column', gap: spacing.stackSm },
   promptLabel: { ...type.labelSm, color: colors.textMuted },

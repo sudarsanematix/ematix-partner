@@ -1,8 +1,24 @@
-import React, { useMemo, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { StyleSheet, View, StyleProp, ViewStyle } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
+import Mapbox, {
+  Camera,
+  LineLayer,
+  MapView,
+  MarkerView,
+  PointAnnotation,
+  ShapeSource,
+  UserLocation,
+} from '@rnmapbox/maps';
 import { useTheme } from '../theme/ThemeProvider';
 import { buildMapTheme } from '../theme/mapTheme';
-import { StyleSheet, View, StyleProp, ViewStyle, Platform } from 'react-native';
-import { WebView } from 'react-native-webview';
 
 export type MapRegion = {
   latitude: number;
@@ -27,6 +43,12 @@ export const CHENNAI_REGION: MapRegion = {
 
 const MAPBOX_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN;
 
+if (MAPBOX_TOKEN) {
+  Mapbox.setAccessToken(MAPBOX_TOKEN);
+} else if (__DEV__) {
+  console.warn('[RealMap] EXPO_PUBLIC_MAPBOX_TOKEN is not set; the native map will render blank.');
+}
+
 export type MapPadding = { top?: number; bottom?: number; left?: number; right?: number } | number;
 
 interface RealMapProps {
@@ -35,273 +57,208 @@ interface RealMapProps {
   interactive?: boolean;
   markers?: MapMarker[];
   routeCoordinates?: [number, number][]; // [longitude, latitude][]
-  showUserLocation?: boolean; // NEW PROP
+  showUserLocation?: boolean;
   mapPadding?: MapPadding;
   children?: React.ReactNode;
 }
 
-export default function RealMap({ style, region = CHENNAI_REGION, interactive = false, markers = [], routeCoordinates = [], showUserLocation = false, mapPadding, children }: RealMapProps) {
+function zoomFromDelta(longitudeDelta: number): number {
+  const zoom = Math.round(Math.log(360 / longitudeDelta) / Math.LN2);
+  return Number.isFinite(zoom) && zoom > 0 ? zoom : 12;
+}
+
+function paddingValue(mapPadding?: MapPadding): number {
+  if (typeof mapPadding === 'number') return mapPadding;
+  if (mapPadding) {
+    const values = [mapPadding.top, mapPadding.bottom, mapPadding.left, mapPadding.right].filter(
+      (n): n is number => typeof n === 'number'
+    );
+    if (values.length > 0) return Math.max(...values);
+  }
+  return 50;
+}
+
+/** Blue location dot with an upward pointer and a pulsing ring, matching the web map. */
+function PulseMarker() {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withRepeat(
+      withTiming(1, { duration: 2000, easing: Easing.out(Easing.ease) }),
+      -1,
+      false
+    );
+  }, [progress]);
+
+  const ringStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 0.6 + progress.value }],
+    opacity: 0.8 * (1 - progress.value),
+  }));
+
+  return (
+    <View style={pulseStyles.container}>
+      <View style={pulseStyles.pointer} />
+      <Animated.View style={[pulseStyles.ring, ringStyle]} />
+      <View style={pulseStyles.dot} />
+    </View>
+  );
+}
+
+/** Translucent yellow hotspot halo that pulses, matching the web map. */
+function HotspotMarker() {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0, { duration: 1000, easing: Easing.inOut(Easing.ease) })
+      ),
+      -1,
+      false
+    );
+  }, [progress]);
+
+  const style = useAnimatedStyle(() => ({
+    transform: [{ scale: 0.8 + 0.5 * progress.value }],
+    opacity: 0.8 - 0.5 * progress.value,
+  }));
+
+  return (
+    <Animated.View style={[hotspotStyles.pulse, style]}>
+      <View style={hotspotStyles.dot} />
+    </Animated.View>
+  );
+}
+
+export default function RealMap({
+  style,
+  region = CHENNAI_REGION,
+  interactive = false,
+  markers = [],
+  routeCoordinates = [],
+  showUserLocation = false,
+  mapPadding,
+  children,
+}: RealMapProps) {
   const { isDark } = useTheme();
   const theme = useMemo(() => buildMapTheme(isDark), [isDark]);
-  const webViewRef = useRef<WebView>(null);
-  const bootRegionRef = useRef(region);
+  const cameraRef = useRef<React.ComponentRef<typeof Camera>>(null);
+  const [bootRegion] = useState(region);
 
-  const markersKey = JSON.stringify(markers);
-  const routeKey = JSON.stringify(routeCoordinates);
   const regionKey = JSON.stringify(region);
-  const paddingKey = JSON.stringify(mapPadding);
+  const routeKey = JSON.stringify(routeCoordinates);
 
-  const isWebViewReady = useRef(false);
-  const pendingInjections = useRef<string[]>([]);
-
-  const safeInject = (js: string) => {
-    if (isWebViewReady.current && webViewRef.current) {
-      webViewRef.current.injectJavaScript(js);
-    } else {
-      pendingInjections.current.push(js);
-    }
-  };
-
-  const markersJs = useMemo(() => {
-    return `
-      if (!window.appMarkers) window.appMarkers = [];
-      window.appMarkers.forEach(m => m.remove());
-      window.appMarkers = [];
-      ${markers.map(marker => {
-      if (marker.id === 'me' || marker.id === 'partner') {
-        return `
-            var el = document.createElement('div');
-            el.className = 'pulse-marker';
-            window.appMarkers.push(new mapboxgl.Marker(el).setLngLat([${marker.longitude}, ${marker.latitude}]).addTo(map));
-          `;
-      } else if (marker.id.startsWith('hotspot')) {
-        return `
-            var el = document.createElement('div');
-            el.className = 'pulse-hotspot';
-            window.appMarkers.push(new mapboxgl.Marker(el).setLngLat([${marker.longitude}, ${marker.latitude}]).addTo(map));
-          `;
-      } else {
-        return `
-            window.appMarkers.push(new mapboxgl.Marker({ color: '${marker.color || '#000000'}' }).setLngLat([${marker.longitude}, ${marker.latitude}]).addTo(map));
-          `;
-      }
-    }).join('\n')}
-    `;
-  }, [markersKey]);
+  const initialZoom = zoomFromDelta(bootRegion.longitudeDelta);
+  const hasRoute = routeCoordinates.length > 1;
 
   useEffect(() => {
-    safeInject(`
-      if (window.updateMarkers) {
-         window.updateMarkers(\`${markersJs.replace(/`/g, '\\`')}\`);
-      }
-      true;
-    `);
-  }, [markersJs]);
-
-  useEffect(() => {
-    const zoom = Math.round(Math.log(360 / region.longitudeDelta) / Math.LN2) || 12;
-    safeInject(`
-      if (window.flyToRegion) {
-         window.flyToRegion(${region.longitude}, ${region.latitude}, ${zoom});
-      }
-      true;
-    `);
+    cameraRef.current?.setCamera({
+      centerCoordinate: [region.longitude, region.latitude],
+      zoomLevel: zoomFromDelta(region.longitudeDelta),
+      animationDuration: 800,
+      animationMode: 'easeTo',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regionKey]);
 
-  const htmlContent = useMemo(() => {
-    // Generate Route JS
-    let routeJs = '';
-    if (routeCoordinates && routeCoordinates.length > 0) {
-      routeJs = `
-        map.on('load', () => {
-          map.addSource('route', {
-            'type': 'geojson',
-            'data': {
-              'type': 'Feature',
-              'properties': {},
-              'geometry': {
-                'type': 'LineString',
-                'coordinates': ${JSON.stringify(routeCoordinates)}
-              }
-            }
-          });
-          map.addLayer({
-            'id': 'route',
-            'type': 'line',
-            'source': 'route',
-            'layout': {
-              'line-join': 'round',
-              'line-cap': 'round'
-            },
-            'paint': {
-              'line-color': '${theme.routeDone}',
-              'line-width': 4
-            }
-          });
-
-          // Automatically fit the map to the route bounds
-          const coordinates = ${JSON.stringify(routeCoordinates)};
-          const bounds = coordinates.reduce(function(bounds, coord) {
-            return bounds.extend(coord);
-          }, new mapboxgl.LngLatBounds(coordinates[0], coordinates[0]));
-          
-          map.fitBounds(bounds, { padding: ${mapPadding ? JSON.stringify(mapPadding) : 50}, duration: 800 });
-        });
-      `;
+  useEffect(() => {
+    if (routeCoordinates.length < 2) return;
+    let minLng = Infinity;
+    let minLat = Infinity;
+    let maxLng = -Infinity;
+    let maxLat = -Infinity;
+    for (const [lng, lat] of routeCoordinates) {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
     }
-
-    const zoom = Math.round(Math.log(360 / region.longitudeDelta) / Math.LN2) || 12;
-
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
-      <link href="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.css" rel="stylesheet">
-      <script src="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.js"></script>
-      <style>
-        :root {
-          --map-base: ${theme.base};
-          --map-attr: ${theme.attributionFg};
-        }
-        body { margin: 0; padding: 0; background: var(--map-base); touch-action: none; overflow: hidden; }
-        #map { position: absolute; top: 0; bottom: 0; width: 100%; touch-action: none; }
-        .mapboxgl-ctrl-attrib { opacity: 0.65; background: transparent !important; }
-        .mapboxgl-ctrl-attrib a { color: var(--map-attr) !important; }
-        
-        .pulse-marker {
-          width: 20px;
-          height: 20px;
-          background-color: #4285F4;
-          border: 4px solid white;
-          border-radius: 50%;
-          position: relative;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        }
-        .pulse-marker::before {
-          content: "";
-          position: absolute;
-          top: -14px;
-          left: 50%;
-          transform: translateX(-50%);
-          width: 0;
-          height: 0;
-          border-left: 7px solid transparent;
-          border-right: 7px solid transparent;
-          border-bottom: 12px solid #4285F4;
-        }
-        .pulse-marker::after {
-          content: "";
-          position: absolute;
-          top: -8px;
-          left: -8px;
-          right: -8px;
-          bottom: -8px;
-          background-color: #4285F4;
-          border-radius: 50%;
-          opacity: 0.3;
-          animation: pulse 2s infinite ease-in-out;
-        }
-        @keyframes pulse {
-          0% { transform: scale(0.6); opacity: 0.8; }
-          100% { transform: scale(1.6); opacity: 0; }
-        }
-        
-        .pulse-hotspot {
-          width: 24px;
-          height: 24px;
-          background-color: rgba(250, 204, 21, 0.4); /* FACC15 but translucent */
-          border: 2px solid #FACC15;
-          border-radius: 50%;
-          position: relative;
-          box-shadow: 0 0 10px rgba(250, 204, 21, 0.5);
-          animation: hotspotPulse 2s infinite ease-in-out;
-        }
-        .pulse-hotspot::after {
-          content: "";
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          width: 8px;
-          height: 8px;
-          background-color: #FACC15;
-          border-radius: 50%;
-        }
-        @keyframes hotspotPulse {
-          0% { transform: scale(0.8); opacity: 0.8; }
-          50% { transform: scale(1.3); opacity: 0.3; }
-          100% { transform: scale(0.8); opacity: 0.8; }
-        }
-      </style>
-      </head>
-      <body>
-      <div id="map"></div>
-      <script>
-      mapboxgl.accessToken = '${MAPBOX_TOKEN}';
-      const map = new mapboxgl.Map({
-          container: 'map',
-          style: '${theme.styleUrl}',
-          center: [${bootRegionRef.current.longitude}, ${bootRegionRef.current.latitude}],
-          zoom: ${zoom},
-          interactive: ${interactive}
-      });
-      
-      let targetCenter = null;
-      let targetZoom = null;
-      window.flyToRegion = function(lng, lat, zoom) {
-        if (typeof map !== 'undefined' && map.isStyleLoaded()) {
-           map.flyTo({ center: [lng, lat], zoom: zoom, speed: 1.2 });
-        } else {
-           targetCenter = [lng, lat];
-           targetZoom = zoom;
-        }
-      };
-
-      window.updateMarkers = function(script) {
-        if (typeof map !== 'undefined' && map.isStyleLoaded()) {
-          try { eval(script); } catch(e) {}
-        }
-      };
-
-      map.on('load', () => {
-         if (targetCenter) {
-            map.flyTo({ center: targetCenter, zoom: targetZoom, speed: 1.2 });
-            targetCenter = null;
-         }
-      });
-
-      ${markersJs}
-      ${routeJs}
-      </script>
-      </body>
-      </html>
-    `;
-  }, [interactive, routeKey, paddingKey, theme]);
+    cameraRef.current?.fitBounds([maxLng, maxLat], [minLng, minLat], paddingValue(mapPadding), 800);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeKey]);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.base }, style]}>
-      <WebView
-        ref={webViewRef}
-        key={isDark ? 'dark' : 'light'}
-        source={{ html: htmlContent, baseUrl: 'https://localhost/' }}
+      <MapView
         style={StyleSheet.absoluteFill}
-        showsHorizontalScrollIndicator={false}
-        showsVerticalScrollIndicator={false}
+        styleURL={theme.styleUrl}
+        scrollEnabled={interactive}
+        zoomEnabled={interactive}
+        rotateEnabled={interactive}
+        pitchEnabled={interactive}
+        requestDisallowInterceptTouchEvent={interactive}
         pointerEvents={interactive ? 'auto' : 'none'}
-        bounces={false}
-        scrollEnabled={false}
-        overScrollMode="never"
-        geolocationEnabled={true}
-        onLoadEnd={() => {
-          isWebViewReady.current = true;
-          if (webViewRef.current && pendingInjections.current.length > 0) {
-            pendingInjections.current.forEach(js => webViewRef.current?.injectJavaScript(js));
-            pendingInjections.current = [];
+        onMapLoadingError={(error) => console.warn('[RealMap] map loading error', error)}
+      >
+        <Camera
+          ref={cameraRef}
+          defaultSettings={{
+            centerCoordinate: [bootRegion.longitude, bootRegion.latitude],
+            zoomLevel: initialZoom,
+          }}
+        />
+
+        {showUserLocation ? <UserLocation visible /> : null}
+
+        {hasRoute ? (
+          <ShapeSource
+            id="route"
+            shape={{
+              type: 'Feature',
+              properties: {},
+              geometry: { type: 'LineString', coordinates: routeCoordinates },
+            }}
+          >
+            <LineLayer
+              id="route-line"
+              style={{
+                lineColor: theme.routeDone,
+                lineWidth: 4,
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
+            />
+          </ShapeSource>
+        ) : null}
+
+        {markers.map((marker) => {
+          const coordinate: [number, number] = [marker.longitude, marker.latitude];
+
+          if (marker.id === 'me' || marker.id === 'partner') {
+            return (
+              <MarkerView
+                key={marker.id}
+                coordinate={coordinate}
+                anchor={{ x: 0.5, y: 0.706 }}
+                allowOverlap
+              >
+                <PulseMarker />
+              </MarkerView>
+            );
           }
-        }}
-      />
+
+          if (marker.id.startsWith('hotspot')) {
+            return (
+              <MarkerView key={marker.id} coordinate={coordinate} allowOverlap>
+                <HotspotMarker />
+              </MarkerView>
+            );
+          }
+
+          return (
+            <PointAnnotation
+              key={marker.id}
+              id={marker.id}
+              coordinate={coordinate}
+              anchor={{ x: 0.5, y: 0.5 }}
+            >
+              <View style={[styles.dot, { backgroundColor: marker.color || '#000000' }]} />
+            </PointAnnotation>
+          );
+        })}
+      </MapView>
+
       {children ? (
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
           {children}
@@ -317,5 +274,80 @@ const styles = StyleSheet.create({
     height: '100%',
     overflow: 'hidden',
     position: 'relative',
-  }
+  },
+  dot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+  },
+});
+
+const pulseStyles = StyleSheet.create({
+  container: {
+    width: 20,
+    height: 34,
+    alignItems: 'center',
+  },
+  pointer: {
+    position: 'absolute',
+    top: 0,
+    left: 3,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 7,
+    borderRightWidth: 7,
+    borderBottomWidth: 12,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#4285F4',
+  },
+  ring: {
+    position: 'absolute',
+    bottom: -8,
+    left: -8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#4285F4',
+  },
+  dot: {
+    position: 'absolute',
+    bottom: 0,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#4285F4',
+    borderWidth: 4,
+    borderColor: '#ffffff',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+});
+
+const hotspotStyles = StyleSheet.create({
+  pulse: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(250, 204, 21, 0.4)',
+    borderWidth: 2,
+    borderColor: '#FACC15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#FACC15',
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FACC15',
+  },
 });
