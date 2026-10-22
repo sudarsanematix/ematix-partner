@@ -1,5 +1,5 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,9 @@ import {
   Platform,
   Modal,
   Alert,
+  RefreshControl,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../theme/ThemeProvider';
 import { buildMapTheme, type MapThemeTokens } from '../../theme/mapTheme';
 import { fonts, type, spacing, radius } from '../../theme/typography';
@@ -26,6 +27,7 @@ import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CHENNAI_REGION } from '../../components/RealMap';
 import { getPartnerStats } from '../../utils/api';
+import { useTranslation } from 'react-i18next';
 
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
@@ -33,6 +35,7 @@ export default function HomeScreen() {
   const styles = createStyles(colors, mapTheme);
   const router = useRouter();
   const { user, logout, isOnline, setIsOnline } = useAuth();
+  const { t } = useTranslation();
   const [hasRequest, setHasRequest] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [currentRequest, setCurrentRequest] = useState<any>(null);
@@ -81,22 +84,33 @@ export default function HomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasRequest]);
 
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const token = await AsyncStorage.getItem('partnerToken');
-        if (token) {
-          const res = await getPartnerStats(token);
-          if (res.success && res.stats) {
-            setPartnerStats(res.stats);
-          }
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('partnerToken');
+      if (token) {
+        const res = await getPartnerStats(token);
+        if (res.success && res.stats) {
+          setPartnerStats(res.stats);
         }
-      } catch (e) {
-        console.warn('Failed to fetch stats', e);
       }
-    };
-    fetchStats();
+    } catch (e) {
+      console.warn('Failed to fetch stats', e);
+    }
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchStats();
+    }, [fetchStats])
+  );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchStats();
+    setRefreshing(false);
+  };
 
   useEffect(() => {
     requestRef.current = currentRequest;
@@ -246,11 +260,24 @@ export default function HomeScreen() {
         }
       };
 
+      const handleRideCompleted = () => {
+        fetchStats();
+      };
+
+      const handleRideCancelled = (data: any) => {
+        const targetId = data?.rideId || data?.id;
+        if (requestRef.current && requestRef.current.id === targetId) {
+          closeRequest();
+        }
+      };
+
       socketService.on('new_ride_request', handleNewRideRequest);
       socketService.on('ride_unavailable', handleRideUnavailable);
+      socketService.on('ride_cancelled', handleRideCancelled);
       socketService.on('ride_assigned', handleRideAssigned);
       socketService.on('ride_error', handleRideError);
       socketService.on('hotspots_data', handleHotspots);
+      socketService.on('ride_completed', handleRideCompleted);
 
       socketService.emit('get_pending_rides', {});
       socketService.emit('get_hotspots', {});
@@ -262,9 +289,11 @@ export default function HomeScreen() {
         }
         socketService.off('new_ride_request', handleNewRideRequest);
         socketService.off('ride_unavailable', handleRideUnavailable);
+        socketService.off('ride_cancelled', handleRideCancelled);
         socketService.off('ride_assigned', handleRideAssigned);
         socketService.off('ride_error', handleRideError);
         socketService.off('hotspots_data', handleHotspots);
+        socketService.off('ride_completed', handleRideCompleted);
       };
     } else {
       closeRequest();
@@ -382,13 +411,13 @@ export default function HomeScreen() {
               <AnimatedWifiIcon isOnline={true} color={colors.primary} />
             </View>
             <Text style={[styles.toggleText, styles.textOnline]}>
-              You're Online - Finding rides...
+              {`${t('home.youAreOnline')} - ${t('home.findingTrips')}`}
             </Text>
           </TouchableOpacity>
         ) : (
           <SwipeButton
             key="offline-slider"
-            title="Slide to Go Online"
+            title={t('home.goOnline')}
             onComplete={handleToggleOnline}
             color={colors.surfaceContainerHigh}
             targetColor={colors.primary}
@@ -404,6 +433,7 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         scrollEnabled={!mapScrollLock}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
       >
         {/* Map Card */}
         <View style={styles.mapCard}>
@@ -454,22 +484,22 @@ export default function HomeScreen() {
         )}
 
         {/* Quick Stats */}
-        <Text style={styles.sectionTitle}>Today's Progress</Text>
+        <Text style={styles.sectionTitle}>{t('earnings.today')}</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsScroll}>
           <View style={[styles.statCard, { backgroundColor: colors.primary }]}>
-            <Text style={[styles.statLabel, { color: colors.onPrimaryContainer }]}>Earnings</Text>
+            <Text style={[styles.statLabel, { color: colors.onPrimaryContainer }]}>{t('home.todayEarnings')}</Text>
             <Text style={[styles.statValue, { color: colors.onPrimary }]}>₹ {partnerStats?.todayEarnings || 0}</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Trips Done</Text>
+            <Text style={styles.statLabel}>{t('home.tripsCompleted')}</Text>
             <Text style={styles.statValue}>{partnerStats?.todayTrips || 0}</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Acceptance</Text>
+            <Text style={styles.statLabel}>{t('common.active')}</Text>
             <Text style={styles.statValue}>{partnerStats?.acceptanceRate || 0}%</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Online Time</Text>
+            <Text style={styles.statLabel}>{t('home.hoursOnline')}</Text>
             <Text style={styles.statValue}>{partnerStats?.onlineTime || '0h 0m'}</Text>
           </View>
         </ScrollView>
@@ -482,11 +512,11 @@ export default function HomeScreen() {
           <View style={styles.requestSheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.requestTitle}>
-              {currentRequest?.type === 'parcel' ? 'New Parcel Delivery' : 'New Ride Request'}
+              {currentRequest?.type === 'parcel' ? t('home.packageDelivery') : t('home.incomingRide')}
             </Text>
             {currentRequest?.customer?.name ? (
               <Text style={styles.requestCustomer}>
-                from {currentRequest.customer.name}
+                {currentRequest.customer.name}
               </Text>
             ) : null}
 
@@ -505,8 +535,8 @@ export default function HomeScreen() {
                 </View>
                 <Text style={[styles.countdownText, offerUrgent && { color: colors.accentRed }]}>
                   {offerSecondsLeft > 0
-                    ? `Auto-accepting by the next partner in ${offerSecondsLeft}s`
-                    : 'Offer expired — finding another partner'}
+                    ? `${offerSecondsLeft}s`
+                    : t('common.loading')}
                 </Text>
               </View>
             )}
@@ -514,10 +544,10 @@ export default function HomeScreen() {
             {currentRequest?.type === 'parcel' && currentRequest?.packageDetails && (
               <View style={{ backgroundColor: 'rgba(0,33,124,0.05)', padding: 12, borderRadius: 8, marginVertical: 8 }}>
                 <Text style={{ fontSize: 13, fontWeight: '600', color: colors.primary, marginBottom: 4 }}>
-                  📦 {currentRequest.packageDetails.weightTier.toUpperCase()} • {currentRequest.packageDetails.category}
+                  📦 {currentRequest.packageDetails.weightTier?.toUpperCase()} • {currentRequest.packageDetails.category}
                 </Text>
                 <Text style={{ fontSize: 12, color: colors.textMuted }}>
-                  Receiver: {currentRequest.packageDetails.receiverName}
+                  {currentRequest.packageDetails.receiverName}
                 </Text>
               </View>
             )}
@@ -525,24 +555,24 @@ export default function HomeScreen() {
             <View style={styles.requestRow}>
               <View style={styles.timeBox}>
                 <Text style={styles.timeMins}>{currentRequest?.eta ? parseInt(currentRequest.eta) : 2}</Text>
-                <Text style={styles.timeUnit}>min away</Text>
+                <Text style={styles.timeUnit}>{t('common.mins')}</Text>
               </View>
               <View style={styles.requestRoute}>
-                <Text style={styles.pickupText}>{currentRequest?.pickup?.address || 'Phoenix Marketcity'}</Text>
-                <Text style={styles.dropoffText}>→ {currentRequest?.dropoff?.address || 'Anna Nagar Tower'}</Text>
+                <Text style={styles.pickupText}>{currentRequest?.pickup?.address || 'Pickup'}</Text>
+                <Text style={styles.dropoffText}>→ {currentRequest?.dropoff?.address || 'Drop'}</Text>
               </View>
               <View style={styles.fareBox}>
                 <Text style={styles.fareAmt}>{formatFare(currentRequest?.price)}</Text>
-                <Text style={styles.fareLabel}>{currentRequest?.type === 'parcel' ? 'Delivery' : 'Ride'}</Text>
+                <Text style={styles.fareLabel}>{currentRequest?.type === 'parcel' ? t('home.packageDelivery') : t('home.rideBooking')}</Text>
               </View>
             </View>
 
             <View style={styles.requestActions}>
               <TouchableOpacity style={styles.declineBtn} onPress={declineRequest}>
-                <Text style={styles.declineText}>Decline</Text>
+                <Text style={styles.declineText}>{t('home.decline')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.acceptBtn} onPress={acceptRide} disabled={accepting}>
-                <Text style={styles.acceptText}>{accepting ? 'Accepting...' : 'Accept Ride'}</Text>
+                <Text style={styles.acceptText}>{accepting ? t('common.loading') : t('home.accept')}</Text>
               </TouchableOpacity>
             </View>
           </View>

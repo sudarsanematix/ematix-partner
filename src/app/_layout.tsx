@@ -9,6 +9,9 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 
+import '../i18n';
+import LanguageSync from '../i18n/LanguageSync';
+
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 if (Platform.OS === 'web') {
@@ -74,6 +77,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
+        <LanguageSync />
         <ThemeProvider>
           <SafeAreaProvider initialMetrics={initialWindowMetrics}>
             <StatusBar hidden />

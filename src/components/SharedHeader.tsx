@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Modal, FlatList } from 'react
 import { useRouter } from 'expo-router';
 import { useTheme } from '../theme/ThemeProvider';
 import { fonts, type, spacing } from '../theme/typography';
+import { useTranslation } from 'react-i18next';
 import MaterialIcon from './MaterialIcon';
 
 interface SharedHeaderProps {
@@ -13,16 +14,29 @@ interface SharedHeaderProps {
 export default function SharedHeader({ currentScreen = 'home', title }: SharedHeaderProps) {
   const { colors, isDark, toggleTheme } = useTheme();
   const styles = createStyles(colors, isDark);
+  const { t } = useTranslation();
 
   const router = useRouter();
 
   const isRootTab = ['home', 'earnings', 'profile', 'ask-ematix'].includes(currentScreen);
-  const displayTitle =
-    title ||
-    currentScreen
-      .split('-')
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
+  const getTabTitle = () => {
+    switch (currentScreen) {
+      case 'home':
+        return t('nav.home');
+      case 'earnings':
+        return t('nav.earnings');
+      case 'ask-ematix':
+        return t('nav.askEmatix');
+      case 'profile':
+        return t('nav.profile');
+      default:
+        return currentScreen
+          .split('-')
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ');
+    }
+  };
+  const displayTitle = title || getTabTitle();
 
   return (
     <View style={styles.header}>

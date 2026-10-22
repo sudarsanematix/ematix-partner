@@ -1,5 +1,5 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getPartnerStats, getPartnerHistory } from '../../utils/api';
 import {
@@ -8,51 +8,67 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  RefreshControl,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../theme/ThemeProvider';
 import { fonts, type, spacing, radius } from '../../theme/typography';
 import SharedHeader from '../../components/SharedHeader';
 import MaterialIcon from '../../components/MaterialIcon';
 
-// Removed mock trips
+import { useTranslation } from 'react-i18next';
 
 export default function EarningsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = createStyles(colors);
+  const { t } = useTranslation();
   
   const [stats, setStats] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const token = await AsyncStorage.getItem('partnerToken');
-        if (token) {
-          const [statsRes, historyRes] = await Promise.all([
-            getPartnerStats(token).catch(() => null),
-            getPartnerHistory(token, 1, 5).catch(() => null)
-          ]);
-          if (statsRes && statsRes.stats) setStats(statsRes.stats);
-          if (historyRes && historyRes.rides) setHistory(historyRes.rides);
-        }
-      } catch (e) {
-        console.warn('Failed to fetch earnings data', e);
+  const fetchData = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('partnerToken');
+      if (token) {
+        const [statsRes, historyRes] = await Promise.all([
+          getPartnerStats(token).catch(() => null),
+          getPartnerHistory(token, 1, 10).catch(() => null)
+        ]);
+        if (statsRes && statsRes.stats) setStats(statsRes.stats);
+        if (historyRes && historyRes.rides) setHistory(historyRes.rides);
       }
-    };
-    fetchData();
+    } catch (e) {
+      console.warn('Failed to fetch earnings data', e);
+    }
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+    }, [fetchData])
+  );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchData();
+    setRefreshing(false);
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <SharedHeader currentScreen="earnings" />
       
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
+      >
         
         {/* Earnings Overview */}
         <View style={styles.earningsCard}>
-          <Text style={styles.periodText}>Lifetime Earnings</Text>
+          <Text style={styles.periodText}>{t('earnings.totalEarnings')}</Text>
           <Text style={styles.totalEarnings}>₹ {stats?.totalEarnings || 0}</Text>
           
           <View style={styles.statsRow}>
@@ -60,7 +76,7 @@ export default function EarningsScreen() {
               <MaterialIcon name="directions-car" size={20} color={colors.primary} />
               <View style={styles.statInfo}>
                 <Text style={styles.statNum}>{stats?.totalTrips || 0}</Text>
-                <Text style={styles.statLabel}>Trips</Text>
+                <Text style={styles.statLabel}>{t('earnings.trips')}</Text>
               </View>
             </View>
             
@@ -70,7 +86,7 @@ export default function EarningsScreen() {
               <MaterialIcon name="schedule" size={20} color={colors.primary} />
               <View style={styles.statInfo}>
                 <Text style={styles.statNum}>{stats?.totalOnlineTime || '0h 0m'}</Text>
-                <Text style={styles.statLabel}>Online</Text>
+                <Text style={styles.statLabel}>{t('earnings.onlineHours')}</Text>
               </View>
             </View>
           </View>
@@ -80,17 +96,17 @@ export default function EarningsScreen() {
         <View style={styles.actionRow}>
           <TouchableOpacity style={styles.actionBtn} onPress={() => router.push('/wallet')}>
             <MaterialIcon name="account-balance" size={20} color={colors.onSurface} />
-            <Text style={styles.actionText}>Cash Out</Text>
+            <Text style={styles.actionText}>{t('wallet.withdraw')}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn}>
+          <TouchableOpacity style={styles.actionBtn} onPress={() => router.push('/wallet')}>
             <MaterialIcon name="bar-chart" size={20} color={colors.onSurface} />
-            <Text style={styles.actionText}>Analytics</Text>
+            <Text style={styles.actionText}>{t('wallet.title')}</Text>
           </TouchableOpacity>
         </View>
 
         {/* Recent Trips */}
         <View style={styles.recentSection}>
-          <Text style={styles.sectionTitle}>Recent Trips</Text>
+          <Text style={styles.sectionTitle}>{t('earnings.recentTrips')}</Text>
           
           <View style={styles.tripsList}>
             {history.length > 0 ? history.map((trip) => (
@@ -104,7 +120,7 @@ export default function EarningsScreen() {
                     />
                   </View>
                   <View>
-                    <Text style={styles.tripRoute}>{trip.pickup?.address?.split(',')[0] || 'Pickup'} → {trip.dropoff?.address?.split(',')[0] || 'Drop'}</Text>
+                    <Text style={styles.tripRoute}>{trip.pickup?.address?.split(',')[0] || t('home.pickup')} → {trip.dropoff?.address?.split(',')[0] || t('home.drop')}</Text>
                     <Text style={styles.tripDate}>{new Date(trip.createdAt).toLocaleDateString()}</Text>
                   </View>
                 </View>
@@ -114,7 +130,7 @@ export default function EarningsScreen() {
                 </View>
               </TouchableOpacity>
             )) : (
-              <Text style={{ textAlign: 'center', marginTop: 20, color: colors.textMuted }}>No recent trips.</Text>
+              <Text style={{ textAlign: 'center', marginTop: 20, color: colors.textMuted }}>{t('earnings.noTripsYet')}</Text>
             )}
           </View>
         </View>

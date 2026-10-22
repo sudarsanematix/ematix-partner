@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Tabs, useRouter } from 'expo-router';
 import { StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../theme/ThemeProvider';
 import { fonts, type } from '../../theme/typography';
 import MaterialIcon from '../../components/MaterialIcon';
@@ -12,6 +13,7 @@ export default function TabLayout() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
 
   useEffect(() => {
     if (!loading && !user) {
@@ -53,28 +55,28 @@ export default function TabLayout() {
       <Tabs.Screen
         name="home"
         options={{
-          title: 'Home',
+          title: t('nav.home'),
           tabBarIcon: ({ color }) => <MaterialIcon name="home" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="earnings"
         options={{
-          title: 'Earnings',
+          title: t('nav.earnings'),
           tabBarIcon: ({ color }) => <MaterialIcon name="account-balance-wallet" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="ask-ematix"
         options={{
-          title: 'Ask Ematix',
+          title: t('nav.askEmatix'),
           tabBarIcon: ({ color }) => <MaterialIcon name="auto-awesome" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
+          title: t('nav.profile'),
           tabBarIcon: ({ color }) => <MaterialIcon name="account-circle" size={24} color={color} />,
         }}
       />

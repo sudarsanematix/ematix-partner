@@ -17,13 +17,8 @@ import { useAuth } from '../../context/AuthContext';
 
 
 
-/** Human label for the Partner.kycStatus enum, used in the menu subtitle. */
-function kycSubtitle(status?: string) {
-  if (status === 'approved') return 'Verified · payouts enabled';
-  if (status === 'under_review') return 'Under review';
-  if (status === 'rejected') return 'Rejected · resubmit required';
-  return 'Aadhaar, PAN, Bank, Selfie';
-}
+import { useTranslation } from 'react-i18next';
+import { getDisplayLabel, resolveAppLanguage } from '../../i18n/languages';
 
 const MENU_ROUTES: Record<string, Href> = {
   Documents: '/documents',
@@ -37,6 +32,7 @@ export default function ProfileScreen() {
   const styles = createStyles(colors);
   const router = useRouter();
   const { user, logout, refresh } = useAuth();
+  const { t, i18n } = useTranslation();
 
   // Pull the authoritative record so KYC status and document state are real
   // rather than whatever was cached at login.
@@ -62,24 +58,36 @@ export default function ProfileScreen() {
 
   const docCount = Object.values(user?.documents || {}).filter(Boolean).length;
 
+  const kycSubtitle = (status?: string) => {
+    if (status === 'approved') return `${t('kyc.statusVerified')} · payouts enabled`;
+    if (status === 'under_review') return t('kyc.statusPending');
+    if (status === 'rejected') return `${t('kyc.statusRejected')} · resubmit required`;
+    return 'Aadhaar, PAN, Bank, Selfie';
+  };
+
   const MENU_ITEMS = [
     {
+      key: 'Documents',
       icon: 'description',
-      title: 'Documents',
-      subtitle: docCount ? `${docCount} uploaded` : 'RC Book, Insurance, License',
+      title: t('settings.vehicleDocuments'),
+      subtitle: docCount ? `${docCount} uploaded` : t('settings.vehicleDocsSub'),
     },
     {
+      key: 'KYC Verification',
       icon: 'fingerprint',
-      title: 'KYC Verification',
+      title: t('settings.kycVerification'),
       subtitle: kycSubtitle(user?.kycStatus),
     },
-    { icon: 'account-balance', title: 'Payout Methods', subtitle: 'Add bank / UPI for payouts' },
-    { icon: 'support-agent', title: 'Help & Support', subtitle: 'Contact partner support' },
+    { key: 'Payout Methods', icon: 'account-balance', title: t('settings.payout'), subtitle: 'Add bank / UPI for payouts' },
+    { key: 'Help & Support', icon: 'support-agent', title: t('settings.helpAndSupport'), subtitle: 'Contact partner support' },
   ];
 
-  const handleMenuPress = (title: string) => {
-    router.push(MENU_ROUTES[title] ?? '/settings');
+  const handleMenuPress = (key: string) => {
+    router.push(MENU_ROUTES[key] ?? '/settings');
   };
+
+  const currentLangCode = resolveAppLanguage(i18n.language) ?? 'en';
+  const currentLangLabel = getDisplayLabel(currentLangCode);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -113,7 +121,7 @@ export default function ProfileScreen() {
 
         <View style={styles.menuSection}>
           {MENU_ITEMS.map((item, index) => (
-            <TouchableOpacity key={index} style={styles.menuItem} activeOpacity={0.8} onPress={() => handleMenuPress(item.title)}>
+            <TouchableOpacity key={index} style={styles.menuItem} activeOpacity={0.8} onPress={() => handleMenuPress(item.key)}>
               <View style={styles.menuLeft}>
                 <View style={styles.menuIconWrap}>
                   <MaterialIcon name={item.icon as any} size={22} color={colors.primary} />
@@ -130,14 +138,14 @@ export default function ProfileScreen() {
 
         {/* Settings */}
         <View style={styles.settingsSection}>
-          <Text style={styles.sectionTitle}>App Settings</Text>
+          <Text style={styles.sectionTitle}>{t('settings.title')}</Text>
           <TouchableOpacity style={styles.settingsItem} activeOpacity={0.8} onPress={() => router.push('/settings')}>
-            <Text style={styles.settingsItemText}>Navigation Preferences</Text>
+            <Text style={styles.settingsItemText}>{t('settings.navigation')}</Text>
             <MaterialIcon name="map" size={18} color={colors.onSurfaceVariant} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.settingsItem} activeOpacity={0.8} onPress={() => router.push('/settings')}>
-            <Text style={styles.settingsItemText}>Language</Text>
-            <Text style={styles.settingsValue}>{user?.preferences?.language || 'English'}</Text>
+            <Text style={styles.settingsItemText}>{t('settings.language')}</Text>
+            <Text style={styles.settingsValue}>{currentLangLabel}</Text>
           </TouchableOpacity>
         </View>
 
@@ -147,7 +155,7 @@ export default function ProfileScreen() {
           router.replace('/login');
         }}>
           <MaterialIcon name="logout" size={20} color={colors.accentRed} />
-          <Text style={styles.logoutText}>Log Out</Text>
+          <Text style={styles.logoutText}>{t('settings.logout')}</Text>
         </TouchableOpacity>
 
       </ScrollView>

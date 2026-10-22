@@ -12,6 +12,8 @@ import {
   BackHandler,
   Image,
   ScrollView,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Linking from 'expo-linking';
@@ -28,6 +30,8 @@ import { socketService } from '../utils/socket';
 import { useAuth } from '../context/AuthContext';
 import { telLink, formatFare } from '../utils/phone';
 import { setUnread, getUnread, clearUnread } from '../utils/unread';
+import { rateCustomer } from '../utils/api';
+import { useTranslation } from 'react-i18next';
 
 type RideState = 'EN_ROUTE_PICKUP' | 'ARRIVED' | 'EN_ROUTE_DROPOFF';
 
@@ -51,6 +55,8 @@ type RideData = {
     notes?: string;
   } | null;
   price?: number | string | null;
+  paymentMethod?: string;
+  paymentStatus?: string;
   customer?: {
     id: string;
     name?: string;
@@ -75,6 +81,7 @@ export default function ActiveRideScreen() {
   const router = useRouter();
   const { rideId } = useLocalSearchParams<{ rideId: string }>();
   const { user, token } = useAuth();
+  const { t } = useTranslation();
   const [ride, setRide] = useState<RideData | null>(null);
   const [rideState, setRideState] = useState<RideState>('EN_ROUTE_PICKUP');
   const [unread, setUnreadState] = useState(() => getUnread(rideId));
@@ -89,6 +96,14 @@ export default function ActiveRideScreen() {
   const [isUploading, setIsUploading] = useState(false);
   const [routeCoords, setRouteCoords] = useState<[number, number][]>([]);
   const [partnerLocation, setPartnerLocation] = useState<{ latitude: number, longitude: number } | null>(null);
+
+  // Post-trip Handshake & Summary State
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [showCashModal, setShowCashModal] = useState(false);
+  const [completedSummary, setCompletedSummary] = useState<any>(null);
+  const [ratingStars, setRatingStars] = useState(5);
+  const [ratingComment, setRatingComment] = useState('');
+  const [isSubmittingRating, setIsSubmittingRating] = useState(false);
 
   const pulse = useRef(new Animated.Value(1)).current;
   const focusedRef = useRef(true);
@@ -199,7 +214,21 @@ export default function ActiveRideScreen() {
       if (s === 'completed' || s === 'cancelled') {
         if (!hasNavigated.current) {
           hasNavigated.current = true;
-          router.replace('/(tabs)/home');
+          clearVerifyTimer();
+          setIsVerifying(false);
+          setShowOtpModal(false);
+          setShowDropoffModal(false);
+          setShowCashModal(false);
+          setShowCancelModal(false);
+          if (s === 'cancelled') {
+            Alert.alert(
+              'Ride Cancelled',
+              'The customer has cancelled this ride request.',
+              [{ text: 'OK', onPress: () => router.replace('/(tabs)/home') }]
+            );
+          } else {
+            router.replace('/(tabs)/home');
+          }
         }
         return;
       }
@@ -290,17 +319,29 @@ export default function ActiveRideScreen() {
       clearVerifyTimer();
       setIsVerifying(false);
       setShowDropoffModal(false);
-      if (hasNavigated.current) return;
-      hasNavigated.current = true;
-      router.replace('/(tabs)/home');
+      setShowCashModal(false);
+      
+      // Store summary info and present the Trip Completed summary sheet
+      setCompletedSummary(data || ride);
+      setShowSummaryModal(true);
     };
 
     const handleRideCancelled = (data: any) => {
       const targetId = getTargetRideId(data);
       if (!data || !targetId || String(targetId) !== String(rideId)) return;
+      clearVerifyTimer();
+      setIsVerifying(false);
+      setShowOtpModal(false);
+      setShowDropoffModal(false);
+      setShowCashModal(false);
+      setShowCancelModal(false);
       if (hasNavigated.current) return;
       hasNavigated.current = true;
-      router.replace('/(tabs)/home');
+      Alert.alert(
+        'Ride Cancelled',
+        'The customer has cancelled this ride request.',
+        [{ text: 'OK', onPress: () => router.replace('/(tabs)/home') }]
+      );
     };
 
     const handleOtpError = (data: any) => {
@@ -454,9 +495,20 @@ export default function ActiveRideScreen() {
       if (ride?.type === 'parcel') {
         setShowDropoffModal(true);
       } else {
-        socketService.emit('complete_ride', { rideId, partnerId: user?.id });
+        // If cash payment, ask driver to confirm cash collection first
+        const isCash = !ride?.paymentMethod || ride?.paymentMethod === 'cash';
+        if (isCash) {
+          setShowCashModal(true);
+        } else {
+          socketService.emit('complete_ride', { rideId, partnerId: user?.id });
+        }
       }
     }
+  };
+
+  const confirmCashCollectionAndComplete = () => {
+    setShowCashModal(false);
+    socketService.emit('complete_ride', { rideId, partnerId: user?.id });
   };
 
   const pickImage = async () => {
@@ -548,15 +600,38 @@ export default function ActiveRideScreen() {
     setIsVerifying(false);
   };
 
+  const finishTripAndExit = () => {
+    setShowSummaryModal(false);
+    if (!hasNavigated.current) {
+      hasNavigated.current = true;
+      router.replace('/(tabs)/home');
+    }
+  };
+
+  const submitCustomerRating = async () => {
+    if (!rideId || isSubmittingRating) return;
+    setIsSubmittingRating(true);
+    try {
+      if (token) {
+        await rateCustomer(token, rideId, ratingStars, ratingComment);
+      }
+    } catch (e) {
+      console.warn('Customer rating failed', e);
+    } finally {
+      setIsSubmittingRating(false);
+      finishTripAndExit();
+    }
+  };
+
   const getButtonText = () => {
     if (ride?.type === 'parcel') {
-      if (rideState === 'EN_ROUTE_PICKUP') return 'Slide to Arrive at Pickup';
-      if (rideState === 'ARRIVED') return 'Enter Sender OTP';
-      return 'Slide to Dropoff Package';
+      if (rideState === 'EN_ROUTE_PICKUP') return t('activeRide.headingToPickup');
+      if (rideState === 'ARRIVED') return t('activeRide.enterCustomerOtp');
+      return t('activeRide.completeTrip');
     }
-    if (rideState === 'EN_ROUTE_PICKUP') return 'Slide to Arrive';
-    if (rideState === 'ARRIVED') return 'Enter OTP to Start Trip';
-    return 'Slide to Dropoff';
+    if (rideState === 'EN_ROUTE_PICKUP') return t('activeRide.arrivedAtPickup');
+    if (rideState === 'ARRIVED') return t('activeRide.enterCustomerOtp');
+    return t('activeRide.completeTrip');
   };
 
   const getButtonColor = () => {
@@ -577,13 +652,13 @@ export default function ActiveRideScreen() {
 
   const getStatusText = () => {
     if (ride?.type === 'parcel') {
-      if (rideState === 'EN_ROUTE_PICKUP') return `Picking up Package`;
-      if (rideState === 'ARRIVED') return `Waiting for Sender OTP`;
-      return `Delivering to Receiver`;
+      if (rideState === 'EN_ROUTE_PICKUP') return t('activeRide.headingToPickup');
+      if (rideState === 'ARRIVED') return t('activeRide.enterCustomerOtp');
+      return t('activeRide.tripInProgress');
     }
-    if (rideState === 'EN_ROUTE_PICKUP') return `Picking up ${passengerName}`;
-    if (rideState === 'ARRIVED') return `Waiting for ${passengerName}`;
-    return `Dropping off ${passengerName}`;
+    if (rideState === 'EN_ROUTE_PICKUP') return `${t('activeRide.headingToPickup')} (${passengerName})`;
+    if (rideState === 'ARRIVED') return `${t('activeRide.arrivedAtPickup')} (${passengerName})`;
+    return `${t('activeRide.tripInProgress')} (${passengerName})`;
   };
 
   return (
@@ -644,11 +719,11 @@ export default function ActiveRideScreen() {
 
         {/* Trip Status & Fare */}
         <View style={styles.etaRow}>
-          <Text style={styles.etaText}>{rideState === 'EN_ROUTE_PICKUP' ? 'On the way' : rideState === 'ARRIVED' ? 'Arrived' : 'In Trip'}</Text>
+          <Text style={styles.etaText}>{rideState === 'EN_ROUTE_PICKUP' ? t('activeRide.headingToPickup') : rideState === 'ARRIVED' ? t('activeRide.arrivedAtPickup') : t('activeRide.tripInProgress')}</Text>
           <View style={styles.etaDivider} />
           <Text style={styles.distText}>{formatFare(ride?.price)}</Text>
           <View style={styles.etaDivider} />
-          <Text style={styles.distText}>{ride?.customer?.phone ? `+${ride.customer.phone.replace(/\D/g, '').slice(-10)}` : 'Fare'}</Text>
+          <Text style={styles.distText}>{ride?.customer?.phone ? `+${ride.customer.phone.replace(/\D/g, '').slice(-10)}` : t('home.estFare')}</Text>
         </View>
 
         {/* Location Info */}
@@ -662,7 +737,7 @@ export default function ActiveRideScreen() {
           </View>
           <View style={styles.locTextWrap}>
             <Text style={styles.locLabel}>
-              {rideState === 'EN_ROUTE_DROPOFF' ? 'Dropoff' : 'Pickup'}
+              {rideState === 'EN_ROUTE_DROPOFF' ? t('home.drop') : t('home.pickup')}
             </Text>
             <Text style={styles.locValue} numberOfLines={1}>
               {rideState === 'EN_ROUTE_DROPOFF'
@@ -762,10 +837,10 @@ export default function ActiveRideScreen() {
               onPress={submitOtp}
               disabled={isVerifying || otpInput.length !== 4}
             >
-              <Text style={styles.submitBtnText}>{isVerifying ? 'Verifying...' : 'Start Trip'}</Text>
+              <Text style={styles.submitBtnText}>{isVerifying ? t('common.loading') : t('activeRide.verifyAndStart')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.cancelBtn} onPress={closeOtpModal} disabled={isVerifying}>
-              <Text style={styles.cancelBtnText}>Cancel</Text>
+              <Text style={styles.cancelBtnText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -777,9 +852,9 @@ export default function ActiveRideScreen() {
           <View style={styles.modalCard}>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
               <View style={styles.modalHandle} />
-              <Text style={styles.modalTitle}>Proof of Delivery</Text>
+              <Text style={styles.modalTitle}>{t('activeRide.completeTrip')}</Text>
               <Text style={styles.modalSubtitle}>
-                Take a picture of the delivered package and enter the receiver's 4-digit PIN.
+                {t('activeRide.enterCustomerOtp')}
               </Text>
               <TouchableOpacity style={styles.photoBtn} onPress={pickImage} activeOpacity={0.8}>
                 {photoUri ? (
@@ -787,7 +862,7 @@ export default function ActiveRideScreen() {
                 ) : (
                   <View style={styles.photoBtnContent}>
                     <MaterialIcon name="camera-alt" size={24} color={colors.primary} />
-                    <Text style={styles.photoBtnText}>Take Photo</Text>
+                    <Text style={styles.photoBtnText}>{t('kyc.uploadDocument')}</Text>
                   </View>
                 )}
               </TouchableOpacity>
@@ -806,51 +881,127 @@ export default function ActiveRideScreen() {
                 onPress={submitDropoff}
                 disabled={isVerifying || isUploading || otpInput.length !== 4 || !photoUri}
               >
-                <Text style={styles.submitBtnText}>{isVerifying || isUploading ? 'Uploading & Verifying...' : 'Complete Delivery'}</Text>
+                <Text style={styles.submitBtnText}>{isVerifying || isUploading ? t('common.loading') : t('activeRide.completeTrip')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.cancelBtn} onPress={closeDropoffModal} disabled={isVerifying || isUploading}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
+                <Text style={styles.cancelBtnText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
         </View>
       </Modal>
 
-      {/* Cancel Modal */}
-      <Modal visible={showCancelModal} transparent animationType="fade" onRequestClose={() => setShowCancelModal(false)}>
+      {/* Cash Collection Modal */}
+      <Modal visible={showCashModal} transparent animationType="fade" onRequestClose={() => setShowCashModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <View style={styles.alertIconWrapper}>
-                <MaterialIcon name="warning" size={26} color={colors.accentRed} />
+          <View style={styles.modalCard}>
+            <View style={styles.cashIconWrap}>
+              <MaterialIcon name="payments" size={32} color={colors.primary} />
+            </View>
+            <Text style={styles.cashModalTitle}>{t('activeRide.collectCash')}</Text>
+            
+            <View style={styles.cashAmountBox}>
+              <Text style={styles.cashAmountLabel}>{t('activeRide.collectCash')}</Text>
+              <Text style={styles.cashAmountValue}>₹{ride?.price || 0}</Text>
+            </View>
+
+            <View style={styles.cashModalActions}>
+              <TouchableOpacity
+                style={styles.cancelCashBtn}
+                onPress={() => setShowCashModal(false)}
+              >
+                <Text style={styles.cancelCashBtnText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.confirmCashBtn}
+                onPress={confirmCashCollectionAndComplete}
+              >
+                <MaterialIcon name="check" size={20} color={colors.onPrimary} />
+                <Text style={styles.confirmCashBtnText}>{t('activeRide.done')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Post-Trip Handshake: Trip Summary & Rating Modal */}
+      <Modal visible={showSummaryModal} transparent animationType="slide" onRequestClose={finishTripAndExit}>
+        <View style={styles.summaryModalOverlay}>
+          <View style={styles.summaryCardSheet}>
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.successIconBadge}>
+              <MaterialIcon name="check-circle" size={42} color="#10B981" />
+            </View>
+
+            <Text style={styles.summaryTitle}>Trip Completed!</Text>
+            <Text style={styles.summarySubtitle}>
+              {completedSummary?.type === 'parcel' ? 'Parcel successfully delivered' : 'Passenger safely dropped off'}
+            </Text>
+
+            {/* Fare Summary Card */}
+            <View style={styles.fareSummaryCard}>
+              <Text style={styles.fareEarnedLabel}>You Earned</Text>
+              <Text style={styles.fareEarnedAmount}>₹{completedSummary?.price || ride?.price || 0}</Text>
+              <View style={styles.fareMetaRow}>
+                <View style={styles.fareMetaItem}>
+                  <MaterialIcon name="directions-car" size={16} color={colors.primary} />
+                  <Text style={styles.fareMetaText}>
+                    {completedSummary?.vehicleType || ride?.vehicleType || 'Ride'}
+                  </Text>
+                </View>
+                <View style={styles.metaDivider} />
+                <View style={styles.fareMetaItem}>
+                  <MaterialIcon name="account-balance-wallet" size={16} color={colors.primary} />
+                  <Text style={styles.fareMetaText}>Added to Wallet</Text>
+                </View>
               </View>
-              <Text style={styles.modalTitle}>Cancel Trip?</Text>
-              <Text style={styles.modalSubtitle}>
-                Are you sure you want to cancel this trip? Frequent cancellations may affect your rating.
+            </View>
+
+            {/* Rate the customer */}
+            <View style={styles.ratingSection}>
+              <Text style={styles.rateTitle}>
+                Rate {completedSummary?.customer?.name || ride?.customer?.name || 'Customer'}
               </Text>
+              <View style={styles.starsRow}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <TouchableOpacity
+                    key={star}
+                    activeOpacity={0.7}
+                    onPress={() => setRatingStars(star)}
+                    style={{ padding: 6 }}
+                  >
+                    <MaterialIcon
+                      name={star <= ratingStars ? 'star' : 'star-border'}
+                      size={32}
+                      color={star <= ratingStars ? '#FFB800' : colors.textMuted}
+                    />
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TextInput
+                style={styles.commentInput}
+                placeholder="Leave feedback for customer (optional)"
+                placeholderTextColor={colors.textMuted}
+                value={ratingComment}
+                onChangeText={setRatingComment}
+                maxLength={200}
+              />
             </View>
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.keepSearchBtn}
-                activeOpacity={0.9}
-                onPress={() => setShowCancelModal(false)}
-              >
-                <Text style={styles.keepSearchBtnText}>No, Continue</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.confirmCancelBtn}
-                activeOpacity={0.9}
-                onPress={() => {
-                  setShowCancelModal(false);
-                  if (rideId) {
-                    socketService.emit('partner_cancel_ride', { rideId });
-                  }
-                  router.replace('/(tabs)/home');
-                }}
-              >
-                <Text style={styles.confirmCancelBtnText}>Yes, Cancel</Text>
-              </TouchableOpacity>
-            </View>
+
+            {/* Finish action */}
+            <TouchableOpacity
+              style={styles.finishTripBtn}
+              onPress={submitCustomerRating}
+              disabled={isSubmittingRating}
+            >
+              {isSubmittingRating ? (
+                <ActivityIndicator color={colors.onPrimary} />
+              ) : (
+                <Text style={styles.finishTripBtnText}>Complete & Go to Home</Text>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1234,5 +1385,204 @@ const createStyles = (colors: any, mapTheme: MapThemeTokens) => StyleSheet.creat
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
+  },
+
+  // Cash Collection Modal Styles
+  cashIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(0, 33, 124, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  cashModalTitle: {
+    ...type.headlineMd,
+    color: colors.onSurface,
+    fontFamily: fonts.bold,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  cashModalSubtitle: {
+    ...type.bodySm,
+    color: colors.onSurfaceVariant,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 18,
+  },
+  cashAmountBox: {
+    width: '100%',
+    backgroundColor: colors.surfaceContainerHigh,
+    borderRadius: radius.lg,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+  },
+  cashAmountLabel: {
+    ...type.labelSm,
+    color: colors.onSurfaceVariant,
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  cashAmountValue: {
+    ...type.headlineXl,
+    fontSize: 34,
+    fontFamily: fonts.extrabold,
+    color: colors.primary,
+  },
+  cashModalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  cancelCashBtn: {
+    flex: 1,
+    height: 50,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceContainerHighest,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelCashBtnText: {
+    ...type.labelLg,
+    fontFamily: fonts.semibold,
+    color: colors.onSurface,
+  },
+  confirmCashBtn: {
+    flex: 2,
+    height: 50,
+    borderRadius: radius.lg,
+    backgroundColor: '#10B981',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  confirmCashBtnText: {
+    ...type.labelLg,
+    fontFamily: fonts.bold,
+    color: colors.onPrimary,
+  },
+
+  // Post-Trip Summary Modal Styles
+  summaryModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  summaryCardSheet: {
+    backgroundColor: colors.surfaceContainerLowest,
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: 24,
+    paddingBottom: Platform.OS === 'ios' ? 44 : 28,
+    alignItems: 'center',
+  },
+  successIconBadge: {
+    marginBottom: 10,
+  },
+  summaryTitle: {
+    ...type.headlineLg,
+    fontSize: 24,
+    fontFamily: fonts.extrabold,
+    color: colors.onSurface,
+    marginBottom: 4,
+  },
+  summarySubtitle: {
+    ...type.bodySm,
+    color: colors.onSurfaceVariant,
+    marginBottom: 20,
+  },
+  fareSummaryCard: {
+    width: '100%',
+    backgroundColor: colors.surfaceContainerHigh,
+    borderRadius: radius.xl,
+    padding: 20,
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+  },
+  fareEarnedLabel: {
+    ...type.labelSm,
+    color: colors.onSurfaceVariant,
+    letterSpacing: 0.5,
+  },
+  fareEarnedAmount: {
+    ...type.headlineXl,
+    fontSize: 38,
+    fontFamily: fonts.extrabold,
+    color: '#10B981',
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  fareMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.outlineVariant,
+    width: '100%',
+  },
+  fareMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  fareMetaText: {
+    ...type.labelSm,
+    color: colors.onSurface,
+    fontFamily: fonts.medium,
+  },
+  metaDivider: {
+    width: 1,
+    height: 14,
+    backgroundColor: colors.outlineVariant,
+  },
+  ratingSection: {
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  rateTitle: {
+    ...type.labelLg,
+    fontFamily: fonts.semibold,
+    color: colors.onSurface,
+    marginBottom: 10,
+  },
+  starsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 16,
+    gap: 4,
+  },
+  commentInput: {
+    width: '100%',
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceContainerHigh,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    paddingHorizontal: 16,
+    ...type.bodySm,
+    color: colors.onSurface,
+  },
+  finishTripBtn: {
+    width: '100%',
+    height: 54,
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  finishTripBtnText: {
+    ...type.labelLg,
+    fontFamily: fonts.bold,
+    color: colors.onPrimary,
   },
 });

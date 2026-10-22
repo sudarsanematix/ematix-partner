@@ -61,11 +61,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const data = await authedFetch('/api/profile/partner/me', token);
       if (data?.user) {
+        if (data.user.isDeleted || data.user.name === 'Deleted Partner') {
+          await logout();
+          return;
+        }
         setUser(data.user);
         await AsyncStorage.setItem('@ematix_partner_user', JSON.stringify(data.user));
       }
-    } catch (e) {
-      console.warn('Failed to refresh partner profile', e);
+    } catch (e: any) {
+      if (e?.status === 404 || e?.code === 'Partner not found or deleted') {
+        await logout();
+      } else {
+        console.warn('Failed to refresh partner profile', e);
+      }
     } finally {
       setIsRefreshing(false);
     }

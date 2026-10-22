@@ -6,6 +6,7 @@ import SharedHeader from '../components/SharedHeader';
 import MaterialIcon from '../components/MaterialIcon';
 import { useTheme } from '../theme/ThemeProvider';
 import { fonts, type, spacing, radius } from '../theme/typography';
+import { useTranslation } from 'react-i18next';
 
 const CONTACT_OPTIONS = [
   { icon: 'call', label: 'Call Support', sub: '9 AM - 9 PM, all days', danger: false },
@@ -37,6 +38,7 @@ export default function SupportScreen() {
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const router = useRouter();
+  const { t } = useTranslation();
 
   const [faqOpen, setFaqOpen] = useState<number | null>(0);
   const [toast, setToast] = useState<string | null>(null);
@@ -56,32 +58,44 @@ export default function SupportScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <SharedHeader currentScreen="support" title="Help & Support" />
+      <SharedHeader currentScreen="support" title={t('support.title')} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Contact options */}
         <View style={styles.optionsGroup}>
-          {CONTACT_OPTIONS.map((opt) => (
-            <TouchableOpacity
-              key={opt.label}
-              style={styles.optionRow}
-              activeOpacity={0.7}
-              onPress={() => handleContactPress(opt.label)}
-            >
-              <View style={styles.optionIconWrap}>
-                <MaterialIcon name={opt.icon as any} size={20} color={colors.primary} />
-              </View>
-              <View style={styles.optionTextWrap}>
-                <Text style={styles.optionText}>{opt.label}</Text>
-                <Text style={styles.optionSub}>{opt.sub}</Text>
-              </View>
-              <MaterialIcon name="chevron-right" size={20} color={colors.outlineVariant} />
-            </TouchableOpacity>
-          ))}
+          <TouchableOpacity
+            style={styles.optionRow}
+            activeOpacity={0.7}
+            onPress={() => router.push('/support-chat')}
+          >
+            <View style={styles.optionIconWrap}>
+              <MaterialIcon name="forum" size={20} color={colors.primary} />
+            </View>
+            <View style={styles.optionTextWrap}>
+              <Text style={styles.optionText}>{t('support.chatWithUs')}</Text>
+              <Text style={styles.optionSub}>2 min response</Text>
+            </View>
+            <MaterialIcon name="chevron-right" size={20} color={colors.outlineVariant} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.optionRow}
+            activeOpacity={0.7}
+            onPress={() => showToast('Launching Helpline…')}
+          >
+            <View style={styles.optionIconWrap}>
+              <MaterialIcon name="call" size={20} color={colors.primary} />
+            </View>
+            <View style={styles.optionTextWrap}>
+              <Text style={styles.optionText}>{t('support.callSupport')}</Text>
+              <Text style={styles.optionSub}>9 AM - 9 PM</Text>
+            </View>
+            <MaterialIcon name="chevron-right" size={20} color={colors.outlineVariant} />
+          </TouchableOpacity>
         </View>
 
         {/* FAQ */}
-        <Text style={styles.groupTitle}>Frequently Asked</Text>
+        <Text style={styles.groupTitle}>{t('support.faq')}</Text>
         <View style={styles.optionsGroup}>
           {FAQS.map((f, i) => {
             const open = faqOpen === i;
@@ -108,7 +122,7 @@ export default function SupportScreen() {
           onPress={() => router.push('/support-ticket')}
         >
           <MaterialIcon name="flag" size={18} color={colors.onPrimary} />
-          <Text style={styles.reportBtnText}>Report a Problem</Text>
+          <Text style={styles.reportBtnText}>{t('support.raiseTicket')}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -117,7 +131,7 @@ export default function SupportScreen() {
           onPress={() => router.push('/support-tickets')}
         >
           <MaterialIcon name="confirmation-number" size={18} color={colors.primary} />
-          <Text style={styles.ticketsBtnText}>My Tickets</Text>
+          <Text style={styles.ticketsBtnText}>{t('support.tickets')}</Text>
         </TouchableOpacity>
 
         <Text style={styles.responseTime}>We usually respond within 2 business hours.</Text>

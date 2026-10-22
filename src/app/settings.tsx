@@ -66,6 +66,10 @@ function Row({
   );
 }
 
+import { useTranslation } from 'react-i18next';
+import { changeAppLanguage } from '../i18n';
+import { SUPPORTED_LANGUAGES, type AppLanguage, resolveAppLanguage } from '../i18n/languages';
+
 const VEHICLE_LABELS: Record<string, string> = {
   bike: 'Two-wheeler',
   auto: 'Auto',
@@ -77,24 +81,20 @@ const VEHICLE_LABELS: Record<string, string> = {
 export default function SettingsScreen() {
   const router = useRouter();
   const { logout, user, token, login, refresh } = useAuth();
+  const { t, i18n } = useTranslation();
   const vehicleLabel = VEHICLE_LABELS[user?.vehicleType || ''] || 'Vehicle';
   const { colors } = useTheme();
   const styles = createStyles(colors);
 
-  // Server-owned navigation preferences. Local state keeps the switches
-  // responsive; the persisted copy wins on refresh.
   const [navPrefs, setNavPrefs] = useState({
     avoidTolls: user?.preferences?.avoidTolls ?? true,
     autoNavigate: user?.preferences?.autoNavigate ?? false,
-    language: user?.preferences?.language ?? 'English',
   });
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  // Adopt a new server copy during render (React's "adjust state when a prop
-  // changes" pattern) instead of in an effect, avoiding a cascading render.
   const [syncedPreferences, setSyncedPreferences] = useState(user?.preferences);
   if (user?.preferences !== syncedPreferences) {
     setSyncedPreferences(user?.preferences);
@@ -103,7 +103,6 @@ export default function SettingsScreen() {
       setNavPrefs({
         avoidTolls: p.avoidTolls,
         autoNavigate: p.autoNavigate,
-        language: p.language,
       });
     }
   }
@@ -121,12 +120,17 @@ export default function SettingsScreen() {
     }
   };
 
-  const setPref = (key: 'avoidTolls' | 'autoNavigate' | 'language', value: boolean | string) => {
+  const setNavPref = (key: 'avoidTolls' | 'autoNavigate', value: boolean) => {
     setNavPrefs((s) => {
       const next = { ...s, [key]: value };
       persistPrefs({ [key]: value });
       return next;
     });
+  };
+
+  const handleLanguageSelect = async (code: AppLanguage) => {
+    await changeAppLanguage(code);
+    persistPrefs({ language: code });
   };
 
   const [isDeleting, setIsDeleting] = useState(false);
@@ -173,11 +177,11 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <SharedHeader currentScreen="settings" title="Settings" />
+      <SharedHeader currentScreen="settings" title={t('settings.title')} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Vehicle */}
-        <Text style={styles.groupTitle}>Vehicle</Text>
+        <Text style={styles.groupTitle}>{t('settings.vehicle')}</Text>
         <View style={styles.group}>
           <View style={styles.vehicleCard}>
             <View style={styles.vehicleIconWrap}>
@@ -197,53 +201,57 @@ export default function SettingsScreen() {
         </View>
 
         {/* Verification */}
-        <Text style={styles.groupTitle}>Verification</Text>
+        <Text style={styles.groupTitle}>{t('settings.verification')}</Text>
         <View style={styles.group}>
-          <Row icon="directions-car" label="Vehicle Documents" sublabel="RC Book · Insurance · License · Permit" onPress={() => router.push('/documents')} />
-          <Row icon="verified-user" label="KYC Verification" sublabel="Aadhaar · PAN · Bank · Selfie" onPress={() => router.push('/kyc')} last />
+          <Row icon="directions-car" label={t('settings.vehicleDocuments')} sublabel={t('settings.vehicleDocsSub')} onPress={() => router.push('/documents')} />
+          <Row icon="verified-user" label={t('settings.kycVerification')} sublabel={t('settings.kycSub')} onPress={() => router.push('/kyc')} last />
         </View>
 
         {/* Payout */}
-        <Text style={styles.groupTitle}>Payout</Text>
+        <Text style={styles.groupTitle}>{t('settings.payout')}</Text>
         <View style={styles.group}>
-          <Row icon="account-balance" label="Payout Bank Account" sublabel="HDFC Bank •••• 1234" onPress={() => router.back()} last />
+          <Row icon="account-balance" label={t('settings.payoutBankAccount')} sublabel="HDFC Bank •••• 1234" onPress={() => router.back()} last />
         </View>
 
         {/* Navigation */}
-        <Text style={styles.groupTitle}>Navigation</Text>
+        <Text style={styles.groupTitle}>{t('settings.navigation')}</Text>
         <View style={styles.group}>
-          <Row icon="toll" label="Avoid toll roads" sublabel="Prefer toll-free routes on trips" value={navPrefs.avoidTolls} onValueChange={(v) => setPref('avoidTolls', v)} />
-          <Row icon="navigation" label="Auto-start navigation" sublabel="Launch maps as soon as a trip is accepted" value={navPrefs.autoNavigate} onValueChange={(v) => setPref('autoNavigate', v)} last />
+          <Row icon="toll" label={t('settings.avoidTolls')} sublabel={t('settings.avoidTollsSub')} value={navPrefs.avoidTolls} onValueChange={(v) => setNavPref('avoidTolls', v)} />
+          <Row icon="navigation" label={t('settings.autoNavigate')} sublabel={t('settings.autoNavigateSub')} value={navPrefs.autoNavigate} onValueChange={(v) => setNavPref('autoNavigate', v)} last />
         </View>
 
         {/* Language */}
-        <Text style={styles.groupTitle}>Language</Text>
+        <Text style={styles.groupTitle}>{t('settings.language')}</Text>
         <View style={styles.group}>
           <View style={styles.langRow}>
-            {['English', 'தமிழ்', 'हिन्दी'].map((lang) => (
-              <TouchableOpacity
-                key={lang}
-                style={[styles.langChip, navPrefs.language === lang && styles.langChipActive]}
-                activeOpacity={0.85}
-                onPress={() => setPref('language', lang)}
-              >
-                <Text style={[styles.langChipText, navPrefs.language === lang && styles.langChipTextActive]}>{lang}</Text>
-              </TouchableOpacity>
-            ))}
+            {SUPPORTED_LANGUAGES.map((lang) => {
+              const currentLang = resolveAppLanguage(i18n.language) ?? 'en';
+              const active = currentLang === lang.code;
+              return (
+                <TouchableOpacity
+                  key={lang.code}
+                  style={[styles.langChip, active && styles.langChipActive]}
+                  activeOpacity={0.85}
+                  onPress={() => handleLanguageSelect(lang.code)}
+                >
+                  <Text style={[styles.langChipText, active && styles.langChipTextActive]}>{lang.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
         {/* Support & Legal */}
-        <Text style={styles.groupTitle}>Support & Legal</Text>
+        <Text style={styles.groupTitle}>{t('settings.supportAndLegal')}</Text>
         <View style={styles.group}>
-          <Row icon="support-agent" label="Help & Support" onPress={() => router.push('/support')} />
-          <Row icon="description" label="Partner Agreement" onPress={() => router.back()} />
-          <Row icon="privacy-tip" label="Privacy Policy" onPress={() => router.back()} />
-          <Row icon="verified-user" label="About" sublabel="Ematix Partner v1.0.0" onPress={() => router.back()} last />
+          <Row icon="support-agent" label={t('settings.helpAndSupport')} onPress={() => router.push('/support')} />
+          <Row icon="description" label={t('settings.partnerAgreement')} onPress={() => router.back()} />
+          <Row icon="privacy-tip" label={t('settings.privacyPolicy')} onPress={() => router.back()} />
+          <Row icon="verified-user" label={t('settings.about')} sublabel="Ematix Partner v1.0.0" onPress={() => router.back()} last />
         </View>
 
         {/* Account Management */}
-        <Text style={styles.groupTitle}>Account</Text>
+        <Text style={styles.groupTitle}>{t('settings.account')}</Text>
         <View style={styles.group}>
           <TouchableOpacity
             style={[styles.optionRow, styles.optionRowLast]}
@@ -259,8 +267,8 @@ export default function SettingsScreen() {
               )}
             </View>
             <View style={styles.optionTextWrap}>
-              <Text style={[styles.optionText, { color: colors.accentRed }]}>Delete Account</Text>
-              <Text style={styles.optionSub}>Permanently delete account and clear personal data</Text>
+              <Text style={[styles.optionText, { color: colors.accentRed }]}>{t('settings.deleteAccount')}</Text>
+              <Text style={styles.optionSub}>{t('settings.deleteAccountSub')}</Text>
             </View>
             <MaterialIcon name="chevron-right" size={20} color={colors.outlineVariant} />
           </TouchableOpacity>
@@ -271,7 +279,7 @@ export default function SettingsScreen() {
           router.replace('/login');
         }}>
           <MaterialIcon name="logout" size={18} color={colors.accentRed} />
-          <Text style={styles.logoutText}>Log Out</Text>
+          <Text style={styles.logoutText}>{t('settings.logout')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

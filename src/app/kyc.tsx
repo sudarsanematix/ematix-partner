@@ -21,6 +21,7 @@ import MaterialIcon from '../components/MaterialIcon';
 import { useAuth } from '../context/AuthContext';
 import { authedFetch } from '../utils/api';
 import { uploadDocument } from '../utils/upload';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Fallback list used only until GET /api/kyc/required resolves. The server owns
@@ -68,6 +69,7 @@ export default function KYCScreen() {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
   const { user, token, refresh } = useAuth();
+  const { t } = useTranslation();
 
   // Server-driven document list; FALLBACK_DOCS is only used before it resolves.
   const [requiredDocs, setRequiredDocs] = useState(FALLBACK_DOCS);
@@ -434,18 +436,23 @@ export default function KYCScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+      >
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
             <MaterialIcon name="arrow-back" size={24} color={colors.onSurface} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Verification</Text>
+          <Text style={styles.headerTitle}>{t('kyc.title')}</Text>
           <View style={{ width: 24 }} />
         </View>
 
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.alertBox}>

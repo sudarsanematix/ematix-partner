@@ -44,4 +44,11 @@ export async function getPartnerHistory(token: string, page = 1, limit = 20) {
   return authedFetch(`/api/rides/partner-history?page=${page}&limit=${limit}`, token);
 }
 
+export async function rateCustomer(token: string, rideId: string, rating: number, comment = '') {
+  return authedFetch(`/api/rides/${rideId}/partner-rating`, token, {
+    method: 'POST',
+    body: JSON.stringify({ rating, comment }),
+  });
+}
+
 export { API_BASE };

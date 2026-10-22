@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -98,79 +100,90 @@ export default function SupportTicketScreen() {
     <SafeAreaView style={styles.container}>
       <SharedHeader title="Report a Problem" currentScreen="support" />
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.headerTitle}>How can we help you?</Text>
-        <Text style={styles.headerSub}>
-          Describe your issue and our partner support team will resolve it as soon as possible.
-        </Text>
-
-        {errorMsg ? (
-          <View style={styles.errorBox}>
-            <MaterialIcon name="error-outline" size={16} color={colors.accentRed} />
-            <Text style={styles.errorText}>{errorMsg}</Text>
-          </View>
-        ) : null}
-
-        <Text style={styles.label}>Select Category</Text>
-        <TouchableOpacity
-          style={styles.picker}
-          activeOpacity={0.8}
-          onPress={() => setCategoryDropdown(!categoryDropdown)}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.pickerText}>{category}</Text>
-          <MaterialIcon
-            name={categoryDropdown ? 'expand-less' : 'expand-more'}
-            size={20}
-            color={colors.textMuted}
-          />
-        </TouchableOpacity>
+          <Text style={styles.headerTitle}>How can we help you?</Text>
+          <Text style={styles.headerSub}>
+            Describe your issue and our partner support team will resolve it as soon as possible.
+          </Text>
 
-        {categoryDropdown && (
-          <View style={styles.dropdownMenu}>
-            {TICKET_CATEGORIES.map((cat, i) => (
-              <TouchableOpacity
-                key={cat}
-                style={[
-                  styles.dropdownItem,
-                  i === TICKET_CATEGORIES.length - 1 && { borderBottomWidth: 0 },
-                ]}
-                onPress={() => {
-                  setCategory(cat);
-                  setCategoryDropdown(false);
-                }}
-              >
-                <Text style={styles.dropdownItemText}>{cat}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+          {errorMsg ? (
+            <View style={styles.errorBox}>
+              <MaterialIcon name="error-outline" size={16} color={colors.accentRed} />
+              <Text style={styles.errorText}>{errorMsg}</Text>
+            </View>
+          ) : null}
 
-        <Text style={styles.label}>Describe your issue</Text>
-        <TextInput
-          style={styles.textArea}
-          placeholder="I noticed a problem with..."
-          placeholderTextColor={colors.textMuted}
-          multiline
-          textAlignVertical="top"
-          value={description}
-          onChangeText={setDescription}
-        />
-      </ScrollView>
+          <Text style={styles.label}>Select Category</Text>
+          <TouchableOpacity
+            style={styles.picker}
+            activeOpacity={0.8}
+            onPress={() => setCategoryDropdown(!categoryDropdown)}
+          >
+            <Text style={styles.pickerText}>{category}</Text>
+            <MaterialIcon
+              name={categoryDropdown ? 'expand-less' : 'expand-more'}
+              size={20}
+              color={colors.textMuted}
+            />
+          </TouchableOpacity>
 
-      <View style={styles.footer}>
-        <TouchableOpacity
-          style={styles.primaryBtn}
-          onPress={handleSubmit}
-          disabled={isSubmitting}
-          activeOpacity={0.85}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator color={colors.onPrimary} />
-          ) : (
-            <Text style={styles.primaryBtnText}>Submit Ticket</Text>
+          {categoryDropdown && (
+            <View style={styles.dropdownMenu}>
+              {TICKET_CATEGORIES.map((cat, i) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[
+                    styles.dropdownItem,
+                    i === TICKET_CATEGORIES.length - 1 && { borderBottomWidth: 0 },
+                  ]}
+                  onPress={() => {
+                    setCategory(cat);
+                    setCategoryDropdown(false);
+                  }}
+                >
+                  <Text style={styles.dropdownItemText}>{cat}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           )}
-        </TouchableOpacity>
-      </View>
+
+          <Text style={styles.label}>Describe your issue</Text>
+          <TextInput
+            style={styles.textArea}
+            placeholder="I noticed a problem with..."
+            placeholderTextColor={colors.textMuted}
+            multiline
+            textAlignVertical="top"
+            value={description}
+            onChangeText={setDescription}
+          />
+        </ScrollView>
+
+        <View style={styles.footer}>
+          <TouchableOpacity
+            style={styles.primaryBtn}
+            onPress={handleSubmit}
+            disabled={isSubmitting}
+            activeOpacity={0.85}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator color={colors.onPrimary} />
+            ) : (
+              <Text style={styles.primaryBtnText}>Submit Ticket</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

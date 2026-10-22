@@ -18,13 +18,8 @@ import TypingIndicator from '../../components/TypingIndicator';
 import RichMessage, { Block } from '../../components/RichMessage';
 import { useAuth } from '../../context/AuthContext';
 import { authedFetch } from '../../utils/api';
-
-const DRIVER_PROMPTS = [
-  { id: '1', label: 'Busy zones near me', icon: 'local-fire-department' },
-  { id: '2', label: 'Summarize tips', icon: 'payments' },
-  { id: '3', label: 'Update RC Book', icon: 'description' },
-  { id: '4', label: 'Peak hours today', icon: 'trending-up' },
-];
+import { useTranslation } from 'react-i18next';
+import { getAppLanguage } from '../../i18n';
 
 type Message = {
   id: string;
@@ -33,17 +28,6 @@ type Message = {
   blocks?: Block[];
 };
 
-const greetingFor = (name?: string | null) => {
-  const firstName = name?.trim().split(/\s+/)[0] || 'there';
-  return `Hi ${firstName}! I'm your Driver AI Assistant. Ask me about hotspots, earnings, or how to update your vehicle documents.`;
-};
-
-const FALLBACK_REPLY =
-  "I'm still learning, but I can help you find hotspots, check your earnings, or manage your profile and documents.";
-
-const OFFLINE_REPLY =
-  "I'm having trouble reaching my assistant right now. Please check your connection and try again in a moment.";
-
 let msgId = 0;
 const nextId = () => `m${++msgId}`;
 
@@ -51,9 +35,21 @@ export default function AskEmatixScreen() {
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const { user, token } = useAuth();
+  const { t } = useTranslation();
+
+  const driverPrompts = [
+    { id: '1', label: t('ai.promptBusyZones'), icon: 'local-fire-department' },
+    { id: '2', label: t('ai.promptSummarizeTips'), icon: 'payments' },
+    { id: '3', label: t('ai.promptUpdateRc'), icon: 'description' },
+    { id: '4', label: t('ai.promptPeakHours'), icon: 'trending-up' },
+  ];
+
+  const greetingText = t('ai.greeting', {
+    name: user?.name?.trim().split(/\s+/)[0] || 'Partner',
+  });
 
   const [messages, setMessages] = useState<Message[]>([
-    { id: 'greet', role: 'assistant', text: greetingFor(null) },
+    { id: 'greet', role: 'assistant', text: greetingText },
   ]);
   const [isTyping, setIsTyping] = useState(false);
   const [inputText, setInputText] = useState('');
@@ -73,16 +69,20 @@ export default function AskEmatixScreen() {
       .map((m) => ({ role: m.role, text: m.text }));
 
     try {
+      const currentLanguage = getAppLanguage();
       const data = await authedFetch('/api/assistant/chat', token, {
         method: 'POST',
-        body: { messages: history },
+        body: {
+          messages: history,
+          language: currentLanguage,
+        },
       });
-      const reply = String(data?.reply || '').trim() || FALLBACK_REPLY;
+      const reply = String(data?.reply || '').trim() || t('ai.fallbackReply');
       const blocks = Array.isArray(data?.blocks) ? (data.blocks as Block[]) : undefined;
       setMessages((m) => [...m, { id: nextId(), role: 'assistant', text: reply, blocks }]);
     } catch (error) {
       console.warn('[AskEmatix] assistant request failed', error);
-      setMessages((m) => [...m, { id: nextId(), role: 'assistant', text: OFFLINE_REPLY }]);
+      setMessages((m) => [...m, { id: nextId(), role: 'assistant', text: t('ai.offlineReply') }]);
     } finally {
       setIsTyping(false);
     }
@@ -108,8 +108,8 @@ export default function AskEmatixScreen() {
               <MaterialIcon name="auto-awesome" size={22} color={colors.primary} />
             </View>
             <View style={styles.heroTextWrap}>
-              <Text style={styles.heroTitle}>Partner AI Concierge</Text>
-              <Text style={styles.heroSubtitle}>Your smart assistant for earnings, hotspots, and support.</Text>
+              <Text style={styles.heroTitle}>{t('ai.conciergeTitle')}</Text>
+              <Text style={styles.heroSubtitle}>{t('ai.conciergeSubtitle')}</Text>
             </View>
           </View>
 
@@ -129,7 +129,7 @@ export default function AskEmatixScreen() {
               >
                 <RichMessage
                   blocks={msg.id === 'greet' ? undefined : msg.blocks}
-                  text={msg.id === 'greet' ? greetingFor(user?.name) : msg.text}
+                  text={msg.id === 'greet' ? greetingText : msg.text}
                   textColor={msg.role === 'user' ? colors.onPrimary : colors.onSurface}
                 />
               </View>
@@ -149,9 +149,9 @@ export default function AskEmatixScreen() {
 
           {/* Suggestions */}
           <View style={styles.promptWrap}>
-            <Text style={styles.promptLabel}>Suggestions</Text>
+            <Text style={styles.promptLabel}>{t('ai.suggestions')}</Text>
             <View style={styles.promptChips}>
-              {DRIVER_PROMPTS.map((p) => (
+              {driverPrompts.map((p) => (
                 <TouchableOpacity
                   key={p.id}
                   style={styles.promptChip}
@@ -171,7 +171,7 @@ export default function AskEmatixScreen() {
           <View style={styles.inputRow}>
             <TextInput
               style={styles.input}
-              placeholder="Ask Ematix a question..."
+              placeholder={t('ai.askPlaceholder')}
               placeholderTextColor={colors.textMuted}
               value={inputText}
               onChangeText={setInputText}
