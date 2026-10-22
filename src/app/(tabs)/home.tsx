@@ -118,9 +118,9 @@ export default function HomeScreen() {
 
   const greeting = () => {
     const hour = new Date().getHours();
-    if (hour < 12) return 'Good Morning';
-    if (hour < 17) return 'Good Afternoon';
-    return 'Good Evening';
+    if (hour < 12) return t('home.goodMorning');
+    if (hour < 17) return t('home.goodAfternoon');
+    return t('home.goodEvening');
   };
 
   const closeRequest = () => {
@@ -398,7 +398,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        <Text style={styles.greeting}>{`${greeting()}, ${user?.name || user?.phone || 'Partner'}`}</Text>
+        <Text style={styles.greeting}>{`${greeting()}, ${user?.name || user?.phone || t('home.partnerTitle')}`}</Text>
 
         {/* Action Toggle (Slide-like design) */}
         {isOnline ? (
@@ -410,7 +410,7 @@ export default function HomeScreen() {
             <View style={[styles.toggleThumb, styles.thumbOnline]}>
               <AnimatedWifiIcon isOnline={true} color={colors.primary} />
             </View>
-            <Text style={[styles.toggleText, styles.textOnline]}>
+            <Text style={[styles.toggleText, styles.textOnline]} numberOfLines={2}>
               {`${t('home.youAreOnline')} - ${t('home.findingTrips')}`}
             </Text>
           </TouchableOpacity>
@@ -439,7 +439,7 @@ export default function HomeScreen() {
         <View style={styles.mapCard}>
           <View style={styles.mapHeader}>
             <MaterialIcon name="local-fire-department" size={20} color={colors.accentRed} />
-            <Text style={styles.mapTitle}>Live Hotspots</Text>
+            <Text style={styles.mapTitle}>{t('home.liveHotspots')}</Text>
           </View>
           <View
             style={styles.mapContainer}
@@ -690,10 +690,12 @@ const createStyles = (colors: any, mapTheme: MapThemeTokens) => StyleSheet.creat
   },
   toggleText: {
     ...type.headlineSm,
-    marginLeft: 16,
+    fontSize: 14,
+    lineHeight: 18,
+    marginLeft: 12,
     flex: 1,
     textAlign: 'center',
-    paddingRight: 48,
+    paddingRight: 40,
   },
   textOffline: {
     color: colors.onSurfaceVariant,

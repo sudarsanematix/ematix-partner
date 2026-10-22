@@ -69,7 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await AsyncStorage.setItem('@ematix_partner_user', JSON.stringify(data.user));
       }
     } catch (e: any) {
-      if (e?.status === 404 || e?.code === 'Partner not found or deleted') {
+      if (e?.status === 401 || e?.message === 'unauthorized' || e?.status === 404 || e?.code === 'Partner not found or deleted') {
         await logout();
       } else {
         console.warn('Failed to refresh partner profile', e);

@@ -115,7 +115,13 @@ export default function AskEmatixScreen() {
 
           {/* Messages */}
           {messages.map((msg) => (
-            <View key={msg.id} style={styles.row}>
+            <View
+              key={msg.id}
+              style={[
+                styles.row,
+                msg.role === 'user' ? styles.rowUser : styles.rowAssistant,
+              ]}
+            >
               {msg.role === 'assistant' && (
                 <View style={styles.assistantAvatar}>
                   <MaterialIcon name="auto-awesome" size={14} color={colors.onPrimary} />
@@ -226,6 +232,13 @@ const createStyles = (colors: any) => StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.stackSm,
     alignItems: 'flex-start',
+    width: '100%',
+  },
+  rowAssistant: {
+    justifyContent: 'flex-start',
+  },
+  rowUser: {
+    justifyContent: 'flex-end',
   },
   assistantAvatar: {
     width: 28,
@@ -242,19 +255,22 @@ const createStyles = (colors: any) => StyleSheet.create({
     elevation: 2,
   },
   bubble: {
-    flex: 1,
     borderRadius: radius.lg,
     padding: spacing.stackMd,
   },
   assistantBubble: {
+    flex: 1,
     backgroundColor: colors.surfaceContainerLowest,
     borderWidth: 1,
     borderColor: colors.surfaceContainerHigh,
   },
   userBubble: {
     backgroundColor: colors.primary,
-    alignSelf: 'flex-end',
     borderTopRightRadius: radius.sm,
+    borderRadius: 14,
+    maxWidth: '82%',
+    alignSelf: 'flex-end',
+    flexShrink: 1,
   },
   messageText: {
     ...type.bodyMd,

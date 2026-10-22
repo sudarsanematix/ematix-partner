@@ -37,6 +37,11 @@
     "decline": "நிராகரி",
     "pickup": "பிக்கப்",
     "drop": "டிராப்",
+    "goodMorning": "காலை வணக்கம்",
+    "goodAfternoon": "மதிய வணக்கம்",
+    "goodEvening": "மாலை வணக்கம்",
+    "partnerTitle": "பார்ட்னர்",
+    "liveHotspots": "நேரலை ஹாட்ஸ்பாட்கள்",
     "tripType": "சவாரி வகை",
     "packageDelivery": "பார்சல் டெலிவரி",
     "rideBooking": "சவாரி முன்பதிவு"

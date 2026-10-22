@@ -37,6 +37,11 @@
     "decline": "Decline",
     "pickup": "Pickup",
     "drop": "Drop",
+    "goodMorning": "Good Morning",
+    "goodAfternoon": "Good Afternoon",
+    "goodEvening": "Good Evening",
+    "partnerTitle": "Partner",
+    "liveHotspots": "Live Hotspots",
     "tripType": "Trip Type",
     "packageDelivery": "Package Delivery",
     "rideBooking": "Ride Booking"
